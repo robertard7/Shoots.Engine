@@ -1,11 +1,5 @@
 # Goals
 
-## Phase 0 Goals — Governance & Guardrails
-- Verify required governance files are present.
-- Keep repository free of code directories and source files.
-- Keep repository free of CI and build tooling.
-- Treat the task board as the authoritative roadmap.
-
 ## Phase 1 Goals — Core Runtime Contract (Documentation Only)
 - Define the engine lifecycle contract.
 - Define the inference API contract.
@@ -13,6 +7,7 @@
 - Define the configuration surface.
 - Define the error model for a cross-language ABI.
 - Keep all Phase 1 artifacts in documentation only.
+- Keep the repository free of source code, build scripts, and CI configuration.
 
 ## Explicitly Deferred
 - Any implementation code or language bindings.
