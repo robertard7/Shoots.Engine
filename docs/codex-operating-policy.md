@@ -4,11 +4,11 @@
 
 This repository is intentionally minimal.
 
-**Phase 2 (Language + ABI Lock) is active.** The repository must:
-- Contain documentation artifacts only.
-- Contain no source code, build scripts, or CI configuration.
+**Phase 3 (Repository Skeleton) is active.** The repository must:
+- Include only minimal build scaffolding and header stubs.
+- Contain no functional engine implementation.
 - Treat the task board as the authoritative roadmap.
-- Deliver locked language and ABI contracts before any implementation work.
+- Preserve deterministic, embeddable constraints.
 
 Everything else comes later.
 

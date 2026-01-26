@@ -1,14 +1,14 @@
 # Goals
 
-## Phase 2 Goals — Language + ABI Lock
-- Select and lock the implementation language.
-- Define the stable C ABI surface for lifecycle, inference, embeddings, configuration, and errors.
-- Map error codes and severity into ABI-safe types.
-- Keep the repository free of source code, build scripts, and CI configuration.
+## Phase 3 Goals — Repository Skeleton (Minimal)
+- Define a minimal source layout with public vs internal separation.
+- Provide a build system skeleton for static and shared libraries.
+- Publish public header stubs matching the ABI contract.
+- Keep the repository free of implementation logic.
 
 ## Explicitly Deferred
-- Any implementation code or language bindings.
-- Build system setup or repository skeleton.
+- Any inference or embedding implementation.
+- Full engine runtime behavior.
 - Tests, harnesses, or CI integration.
 - Host adapters or Shoots integration.
 
