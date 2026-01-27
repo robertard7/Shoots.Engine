@@ -17,6 +17,7 @@ The engine lifecycle defines how a host creates, uses, and destroys an engine in
 - The host explicitly destroys the engine instance.
 - Destruction releases all engine-owned resources.
 - After shutdown, the handle is invalid and must not be reused.
+- A second destroy call returns a deterministic invalid-state error.
 
 ## Ownership Rules
 - The host owns the lifecycle and is responsible for calling create and destroy.
