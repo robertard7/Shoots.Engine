@@ -178,6 +178,7 @@ static void *shoots_engine_alloc(shoots_engine_t *engine,
   header->magic = SHOOTS_ALLOC_MAGIC;
   header->next = (shoots_alloc_header_t *)engine->allocations_head;
   engine->allocations_head = header;
+  shoots_assert_invariants(engine);
   return (void *)(header + 1);
 }
 
