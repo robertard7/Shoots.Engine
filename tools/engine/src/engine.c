@@ -4,6 +4,7 @@
 #include <string.h>
 
 #define SHOOTS_ENGINE_MAGIC 0x53484f4fu
+#define SHOOTS_ENGINE_MAGIC_DESTROYED 0x44454ad1u
 #define SHOOTS_ALLOC_MAGIC 0x53484f41u
 
 typedef struct shoots_alloc_header {
@@ -130,12 +131,17 @@ static void shoots_engine_alloc_free(shoots_engine_t *engine, void *buffer) {
     return;
   }
   shoots_alloc_header_t **cursor = (shoots_alloc_header_t **)&engine->allocations_head;
+  int found = 0;
   while (*cursor != NULL) {
     if (*cursor == header) {
       *cursor = header->next;
+      found = 1;
       break;
     }
     cursor = &(*cursor)->next;
+  }
+  if (!found) {
+    return;
   }
   shoots_release_memory(engine, header->total_size);
   header->magic = 0;
@@ -223,12 +229,12 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   }
 
   engine->state = SHOOTS_ENGINE_STATE_DESTROYED;
-  engine->magic = 0;
+  engine->magic = SHOOTS_ENGINE_MAGIC_DESTROYED;
 
   engine->model_root_path = NULL;
   shoots_engine_release_all(engine);
-
-  free(engine);
+  engine->memory_used_bytes = 0;
+  engine->memory_limit_bytes = 0;
   return SHOOTS_OK;
 }
 
@@ -254,6 +260,20 @@ shoots_error_code_t shoots_engine_free(shoots_engine_t *engine,
   }
   shoots_alloc_header_t *header = ((shoots_alloc_header_t *)buffer) - 1;
   if (header->magic != SHOOTS_ALLOC_MAGIC) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "buffer not owned by engine");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_alloc_header_t *cursor = (shoots_alloc_header_t *)engine->allocations_head;
+  int found = 0;
+  while (cursor != NULL) {
+    if (cursor == header) {
+      found = 1;
+      break;
+    }
+    cursor = cursor->next;
+  }
+  if (!found) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "buffer not owned by engine");
     return SHOOTS_ERR_INVALID_ARGUMENT;
