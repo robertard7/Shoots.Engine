@@ -542,6 +542,11 @@ shoots_error_code_t shoots_infer(shoots_engine_t *engine,
                      "input_tokens is null");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
+  if (engine->provider_runtime == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider runtime missing");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   shoots_error_code_t model_status =
       shoots_validate_model(engine, request->model, out_error);
   if (model_status != SHOOTS_OK) {
@@ -575,6 +580,11 @@ shoots_error_code_t shoots_embed(shoots_engine_t *engine,
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "input_tokens is null");
     return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (engine->provider_runtime == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider runtime missing");
+    return SHOOTS_ERR_INVALID_STATE;
   }
   shoots_error_code_t model_status =
       shoots_validate_model(engine, request->model, out_error);

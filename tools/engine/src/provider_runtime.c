@@ -3,9 +3,12 @@
 #include <string.h>
 
 struct shoots_provider_runtime {
-  uint8_t allow_background_threads;
-  uint8_t allow_filesystem_io;
-  uint8_t allow_network_io;
+  uint8_t config_allow_background_threads;
+  uint8_t config_allow_filesystem_io;
+  uint8_t config_allow_network_io;
+  uint8_t effective_allow_background_threads;
+  uint8_t effective_allow_filesystem_io;
+  uint8_t effective_allow_network_io;
 };
 
 static void shoots_error_clear(shoots_error_info_t *out_error) {
@@ -59,9 +62,12 @@ shoots_error_code_t shoots_provider_runtime_create(
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   memset(runtime, 0, sizeof(*runtime));
-  runtime->allow_background_threads = config->allow_background_threads;
-  runtime->allow_filesystem_io = config->allow_filesystem_io;
-  runtime->allow_network_io = config->allow_network_io;
+  runtime->config_allow_background_threads = config->allow_background_threads;
+  runtime->config_allow_filesystem_io = config->allow_filesystem_io;
+  runtime->config_allow_network_io = config->allow_network_io;
+  runtime->effective_allow_background_threads = 0;
+  runtime->effective_allow_filesystem_io = 0;
+  runtime->effective_allow_network_io = 0;
 
   *out_runtime = runtime;
   return SHOOTS_OK;
