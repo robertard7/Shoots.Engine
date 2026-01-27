@@ -409,6 +409,11 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
     if (runtime_status != SHOOTS_OK) {
       return runtime_status;
     }
+    if (engine->provider_runtime != NULL) {
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                       "provider runtime still attached");
+      return SHOOTS_ERR_INVALID_STATE;
+    }
   }
 
   shoots_assert_invariants(engine);
