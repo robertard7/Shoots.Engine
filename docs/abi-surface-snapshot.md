@@ -128,3 +128,21 @@ shoots_error_code_t shoots_embed(
   shoots_embedding_response_t *response,
   shoots_error_info_t *out_error);
 ```
+
+## Header FFI Audit (Phase 6.2)
+
+### C++ Compatibility
+- The header uses `extern "C"` guards for C++ callers.
+- All exposed declarations are C-compatible and avoid C++-only constructs.
+
+### Rust / Zig FFI Safety
+- No flexible array members.
+- No compiler-specific packing pragmas or attributes.
+- Integer fields use fixed-width types (`uint32_t`, `uint64_t`, `uint8_t`) where size is required.
+- Opaque handles are forward-declared and only passed by pointer.
+
+### ABI Notes / Hazards
+- `size_t` appears in multiple structs; its width is platform-defined and must be mirrored
+  with `usize` in Rust or `usize` in Zig for FFI bindings.
+- C enum underlying size is implementation-defined; bindings should mirror the C ABI
+  (`repr(C)` in Rust or explicit enum backing type in Zig) rather than assuming `int32_t`.
