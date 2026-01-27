@@ -22,3 +22,12 @@ If it is not listed above, it is out of scope.
 ## Phase 7 Lock — Host & Integration Contracts
 - Host responsibility contract, capability declaration, and integration examples are locked.
 - No further Phase 7 contract changes without a phase bump.
+
+## Phase 8 Lock — Provider Runtime Hardening
+- Provider runtime lifecycle/state machine semantics are locked.
+- Provider capability lockdown and stubbed execution entrypoints are locked.
+- No further Phase 8 runtime behavior changes without a phase bump.
+
+## Phase 9 Lock — Session Continuity Core
+- Session handle, rolling chat buffer, context ledger, and command memory semantics are locked.
+- No further Phase 9 continuity behavior changes without a phase bump.

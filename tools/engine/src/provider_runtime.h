@@ -14,4 +14,8 @@ shoots_error_code_t shoots_provider_runtime_destroy(
   shoots_provider_runtime_t *runtime,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_provider_runtime_validate_ready(
+  const shoots_provider_runtime_t *runtime,
+  shoots_error_info_t *out_error);
+
 #endif
