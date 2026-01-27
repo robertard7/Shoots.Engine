@@ -117,9 +117,9 @@ shoots_error_code_t shoots_provider_runtime_validate_ready(
   shoots_error_info_t *out_error) {
   shoots_error_clear(out_error);
   if (runtime == NULL) {
-    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
-                     "runtime missing");
-    return SHOOTS_ERR_INVALID_STATE;
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "runtime is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   if (runtime->state != SHOOTS_PROVIDER_RUNTIME_STATE_READY) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
