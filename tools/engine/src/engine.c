@@ -402,6 +402,23 @@ static void shoots_session_set_last_error(shoots_session_t *session, const char 
   session->last_error = copy;
 }
 
+static void shoots_emit_command_error(shoots_engine_t *engine,
+                                      shoots_session_t *session,
+                                      const char *message,
+                                      const char *ledger_message) {
+  if (engine == NULL || session == NULL) {
+    return;
+  }
+  if (message != NULL) {
+    shoots_session_set_last_error(session, message);
+  }
+  if (ledger_message != NULL && ledger_message[0] != '\0') {
+    shoots_ledger_entry_t *error_entry = NULL;
+    shoots_ledger_append_internal(engine, SHOOTS_LEDGER_ENTRY_ERROR,
+                                  ledger_message, &error_entry, NULL);
+  }
+}
+
 static void shoots_evict_result_by_ledger_id(shoots_engine_t *engine,
                                              uint64_t ledger_entry_id) {
   if (engine == NULL || ledger_entry_id == 0) {
@@ -438,6 +455,11 @@ static void shoots_evict_ledger_head(shoots_engine_t *engine) {
     return;
   }
   shoots_ledger_entry_t *entry = engine->ledger_head;
+#ifndef NDEBUG
+  if (entry->next != NULL) {
+    assert(entry->next->entry_id > entry->entry_id);
+  }
+#endif
   engine->ledger_head = entry->next;
   if (engine->ledger_head == NULL) {
     engine->ledger_tail = NULL;
@@ -462,6 +484,11 @@ static void shoots_evict_command_head(shoots_engine_t *engine) {
     return;
   }
   shoots_command_record_t *record = engine->commands_head;
+#ifndef NDEBUG
+  if (record->next != NULL) {
+    assert(record->next->command_seq > record->command_seq);
+  }
+#endif
   engine->commands_head = record->next;
   if (engine->commands_head == NULL) {
     engine->commands_tail = NULL;
@@ -1452,41 +1479,50 @@ shoots_error_code_t shoots_command_append_internal(
   if (execution_slot == 0) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "execution_slot is invalid");
+    shoots_emit_command_error(engine, session, "execution_slot is invalid",
+                              "command failure: execution_slot invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   if (command_id == NULL || command_id[0] == '\0') {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "command_id is null or empty");
+    shoots_emit_command_error(engine, session, "command_id is null or empty",
+                              "command failure: command_id invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   if (args == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "args is null");
+    shoots_emit_command_error(engine, session, "args is null",
+                              "command failure: args invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   if (has_last_result > 1) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "has_last_result invalid");
+    shoots_emit_command_error(engine, session, "has_last_result invalid",
+                              "command failure: has_last_result invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   if (engine->next_command_seq == 0) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "command sequence exhausted");
+    shoots_emit_command_error(engine, session, "command sequence exhausted",
+                              "command failure: command sequence exhausted");
     return SHOOTS_ERR_INVALID_STATE;
   }
   if (session->next_execution_slot == 0) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "execution slots exhausted");
+    shoots_emit_command_error(engine, session, "execution slots exhausted",
+                              "command failure: execution slots exhausted");
     return SHOOTS_ERR_INVALID_STATE;
   }
   if (execution_slot != session->next_execution_slot) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "execution slot out of order");
-    shoots_session_set_last_error(session, "execution slot out of order");
-    shoots_ledger_entry_t *error_entry = NULL;
-    shoots_ledger_append_internal(engine, SHOOTS_LEDGER_ENTRY_ERROR,
-                                  "command failure: execution slot out of order",
-                                  &error_entry, NULL);
+    shoots_emit_command_error(engine, session, "execution slot out of order",
+                              "command failure: execution slot out of order");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   size_t command_id_len = strlen(command_id);
@@ -1495,6 +1531,8 @@ shoots_error_code_t shoots_command_append_internal(
   if (record_bytes > SHOOTS_COMMAND_MAX_BYTES) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "command payload too large");
+    shoots_emit_command_error(engine, session, "command payload too large",
+                              "command failure: payload too large");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
 
@@ -1588,16 +1626,22 @@ shoots_error_code_t shoots_result_append_internal(
   if (command_id == NULL || command_id[0] == '\0') {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "command_id is null or empty");
+    shoots_emit_command_error(engine, session, "command_id is null or empty",
+                              "result failure: command_id invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   if (payload == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "payload is null");
+    shoots_emit_command_error(engine, session, "payload is null",
+                              "result failure: payload invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   if (status < SHOOTS_RESULT_STATUS_OK || status > SHOOTS_RESULT_STATUS_ERROR) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "result status invalid");
+    shoots_emit_command_error(engine, session, "result status invalid",
+                              "result failure: status invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   size_t command_id_len = strlen(command_id);
@@ -1605,6 +1649,8 @@ shoots_error_code_t shoots_result_append_internal(
   if (payload_len > SHOOTS_RESULT_MAX_BYTES) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "payload too large");
+    shoots_emit_command_error(engine, session, "payload too large",
+                              "result failure: payload too large");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   if (command_id_len > SIZE_MAX - payload_len) {
@@ -1620,6 +1666,8 @@ shoots_error_code_t shoots_result_append_internal(
   if (ledger_len > SHOOTS_LEDGER_MAX_BYTES) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "ledger payload too large");
+    shoots_emit_command_error(engine, session, "ledger payload too large",
+                              "result failure: ledger payload too large");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   char *ledger_payload = (char *)shoots_engine_alloc_internal(
@@ -1646,6 +1694,8 @@ shoots_error_code_t shoots_result_append_internal(
       engine, SHOOTS_LEDGER_ENTRY_RESULT, ledger_payload, &ledger_entry, out_error);
   shoots_engine_alloc_free_internal(engine, ledger_payload);
   if (ledger_status != SHOOTS_OK) {
+    shoots_emit_command_error(engine, session, "ledger append failed",
+                              "result failure: ledger append failed");
     return ledger_status;
   }
 
