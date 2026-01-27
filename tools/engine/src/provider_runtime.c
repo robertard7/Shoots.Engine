@@ -1,6 +1,9 @@
 #include "provider_runtime.h"
 
 #include <string.h>
+#ifndef NDEBUG
+#include <assert.h>
+#endif
 
 struct shoots_provider_runtime {
   uint32_t state;
@@ -17,6 +20,21 @@ enum shoots_provider_runtime_state {
   SHOOTS_PROVIDER_RUNTIME_STATE_READY = 1,
   SHOOTS_PROVIDER_RUNTIME_STATE_DESTROYED = 2
 };
+
+#ifndef NDEBUG
+static void shoots_provider_runtime_assert_invariants(
+  const shoots_provider_runtime_t *runtime) {
+  if (runtime == NULL) {
+    return;
+  }
+  if (runtime->state == SHOOTS_PROVIDER_RUNTIME_STATE_READY ||
+      runtime->state == SHOOTS_PROVIDER_RUNTIME_STATE_DESTROYED) {
+    assert(runtime->effective_allow_background_threads == 0);
+    assert(runtime->effective_allow_filesystem_io == 0);
+    assert(runtime->effective_allow_network_io == 0);
+  }
+}
+#endif
 
 static void shoots_error_clear(shoots_error_info_t *out_error) {
   if (out_error == NULL) {
@@ -76,6 +94,9 @@ shoots_error_code_t shoots_provider_runtime_create(
   runtime->effective_allow_background_threads = 0;
   runtime->effective_allow_filesystem_io = 0;
   runtime->effective_allow_network_io = 0;
+#ifndef NDEBUG
+  shoots_provider_runtime_assert_invariants(runtime);
+#endif
 
   *out_runtime = runtime;
   return SHOOTS_OK;
@@ -101,6 +122,9 @@ shoots_error_code_t shoots_provider_runtime_destroy(
                      "runtime not attached");
     return SHOOTS_ERR_INVALID_STATE;
   }
+#ifndef NDEBUG
+  shoots_provider_runtime_assert_invariants(runtime);
+#endif
   if (runtime->state != SHOOTS_PROVIDER_RUNTIME_STATE_READY) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "runtime state invalid");
@@ -133,5 +157,8 @@ shoots_error_code_t shoots_provider_runtime_validate_ready(
                      "runtime effective permissions invalid");
     return SHOOTS_ERR_INVALID_STATE;
   }
+#ifndef NDEBUG
+  shoots_provider_runtime_assert_invariants(runtime);
+#endif
   return SHOOTS_OK;
 }
