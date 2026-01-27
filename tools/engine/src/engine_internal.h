@@ -41,6 +41,30 @@ typedef enum shoots_ledger_entry_type {
   SHOOTS_LEDGER_ENTRY_ERROR = 4
 } shoots_ledger_entry_type_t;
 
+typedef enum shoots_tool_category {
+  SHOOTS_TOOL_CATEGORY_UNSPECIFIED = 0,
+  SHOOTS_TOOL_CATEGORY_EXECUTION = 1,
+  SHOOTS_TOOL_CATEGORY_INTEGRATION = 2
+} shoots_tool_category_t;
+
+typedef enum shoots_tool_arbitration_result {
+  SHOOTS_TOOL_ARBITRATION_ACCEPT = 0,
+  SHOOTS_TOOL_ARBITRATION_REJECT = 1
+} shoots_tool_arbitration_result_t;
+
+typedef struct shoots_plan_request {
+  const char *intent_id;
+  const char **requested_tools;
+  size_t requested_tool_count;
+  const char *constraints;
+} shoots_plan_request_t;
+
+typedef struct shoots_plan_response {
+  char **ordered_tool_ids;
+  char **rejection_reasons;
+  size_t tool_count;
+} shoots_plan_response_t;
+
 typedef enum shoots_result_status {
   SHOOTS_RESULT_STATUS_OK = 0,
   SHOOTS_RESULT_STATUS_ERROR = 1
@@ -76,6 +100,15 @@ typedef struct shoots_result_record {
   size_t payload_len;
   struct shoots_result_record *next;
 } shoots_result_record_t;
+
+typedef struct shoots_tool_record {
+  char *tool_id;
+  size_t tool_id_len;
+  shoots_tool_category_t category;
+  uint64_t capability_mask;
+  uint64_t tool_hash;
+  struct shoots_tool_record *next;
+} shoots_tool_record_t;
 
 struct shoots_model {
   uint32_t magic;
@@ -130,6 +163,9 @@ struct shoots_engine {
   size_t ledger_entry_count;
   size_t ledger_total_bytes;
   uint64_t next_ledger_id;
+  struct shoots_tool_record *tools_head;
+  struct shoots_tool_record *tools_tail;
+  uint8_t tools_locked;
   struct shoots_result_record *results_head;
   struct shoots_result_record *results_tail;
   shoots_command_record_t *commands_head;
@@ -219,6 +255,43 @@ shoots_error_code_t shoots_result_append_internal(
   shoots_result_status_t status,
   const char *payload,
   shoots_result_record_t **out_record,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_tool_register_internal(
+  shoots_engine_t *engine,
+  const char *tool_id,
+  shoots_tool_category_t category,
+  uint64_t capability_mask,
+  shoots_tool_record_t **out_record,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_tool_arbitrate_internal(
+  shoots_engine_t *engine,
+  const char *tool_id,
+  shoots_tool_arbitration_result_t *out_result,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_tool_invoke_internal(
+  shoots_engine_t *engine,
+  const char *tool_id,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_plan_internal(
+  shoots_engine_t *engine,
+  const shoots_plan_request_t *request,
+  shoots_plan_response_t *response,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_plan_response_free_internal(
+  shoots_engine_t *engine,
+  shoots_plan_response_t *response,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_engine_can_execute_internal(
+  shoots_engine_t *engine,
+  shoots_session_t *session,
+  const char *tool_id,
+  const char **out_reason,
   shoots_error_info_t *out_error);
 
 shoots_error_code_t shoots_command_fetch_last_internal(
