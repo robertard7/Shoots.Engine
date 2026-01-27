@@ -14,6 +14,7 @@
 #define SHOOTS_MODEL_MAGIC_DESTROYED 0x4d4f4444u
 #define SHOOTS_SESSION_MAGIC 0x53485353u
 #define SHOOTS_SESSION_MAGIC_DESTROYED 0x53445353u
+#define SHOOTS_SESSION_CHAT_CAPACITY 4096u
 
 typedef struct shoots_alloc_header {
   size_t payload_size;
@@ -82,6 +83,13 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
   } else {
     assert(engine->sessions_tail != NULL);
     assert(engine->sessions_tail->next == NULL);
+    const shoots_session_t *cursor = engine->sessions_head;
+    while (cursor != NULL) {
+      assert(cursor->chat_capacity == SHOOTS_SESSION_CHAT_CAPACITY);
+      assert(cursor->chat_head < cursor->chat_capacity || cursor->chat_capacity == 0);
+      assert(cursor->chat_size <= cursor->chat_capacity);
+      cursor = cursor->next;
+    }
   }
 #endif
 }
@@ -185,6 +193,11 @@ static shoots_error_code_t shoots_validate_session(shoots_engine_t *engine,
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "session owned by different engine");
     return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (session->chat_capacity != SHOOTS_SESSION_CHAT_CAPACITY) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session chat buffer invalid");
+    return SHOOTS_ERR_INVALID_STATE;
   }
   return SHOOTS_OK;
 }
@@ -655,6 +668,19 @@ shoots_error_code_t shoots_session_create_internal(
   memcpy(intent_copy, intent_id, intent_len + 1);
   session->intent_id = intent_copy;
   session->last_error = NULL;
+  session->chat_capacity = SHOOTS_SESSION_CHAT_CAPACITY;
+  session->chat_size = 0;
+  session->chat_head = 0;
+  session->chat_buffer = (char *)shoots_engine_alloc_internal(
+      engine, session->chat_capacity, out_error);
+  if (session->chat_buffer == NULL) {
+    session->magic = SHOOTS_SESSION_MAGIC_DESTROYED;
+    shoots_engine_alloc_free_internal(engine, session->intent_id);
+    session->intent_id = NULL;
+    shoots_engine_alloc_free_internal(engine, session);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memset(session->chat_buffer, 0, session->chat_capacity);
   session->next = NULL;
 
   shoots_register_session(engine, session);
@@ -723,6 +749,142 @@ shoots_error_code_t shoots_session_close_internal(
   }
   session->state = SHOOTS_SESSION_STATE_CLOSED;
   shoots_assert_invariants(engine);
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_session_chat_append_internal(
+  shoots_session_t *session,
+  const char *text,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (session == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (text == NULL || text[0] == '\0') {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "text is null or empty");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t session_status =
+      shoots_validate_session(session->engine, session, out_error);
+  if (session_status != SHOOTS_OK) {
+    return session_status;
+  }
+  if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session not active");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  size_t text_len = strlen(text);
+  if (text_len == 0) {
+    return SHOOTS_OK;
+  }
+  if (session->chat_capacity == 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "chat buffer disabled");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (text_len >= session->chat_capacity) {
+    const char *slice = text + (text_len - session->chat_capacity);
+    memcpy(session->chat_buffer, slice, session->chat_capacity);
+    session->chat_head = 0;
+    session->chat_size = session->chat_capacity;
+    shoots_assert_invariants(session->engine);
+    return SHOOTS_OK;
+  }
+  if (session->chat_size + text_len > session->chat_capacity) {
+    size_t overflow = session->chat_size + text_len - session->chat_capacity;
+    session->chat_head =
+        (session->chat_head + overflow) % session->chat_capacity;
+    session->chat_size = session->chat_capacity - text_len;
+  }
+  size_t tail = (session->chat_head + session->chat_size) % session->chat_capacity;
+  size_t first_chunk = session->chat_capacity - tail;
+  if (first_chunk > text_len) {
+    first_chunk = text_len;
+  }
+  memcpy(session->chat_buffer + tail, text, first_chunk);
+  if (first_chunk < text_len) {
+    memcpy(session->chat_buffer, text + first_chunk, text_len - first_chunk);
+  }
+  session->chat_size += text_len;
+  shoots_assert_invariants(session->engine);
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_session_chat_snapshot_internal(
+  shoots_session_t *session,
+  char **out_buffer,
+  size_t *out_length,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_buffer == NULL || out_length == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "output is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_buffer = NULL;
+  *out_length = 0;
+  if (session == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t session_status =
+      shoots_validate_session(session->engine, session, out_error);
+  if (session_status != SHOOTS_OK) {
+    return session_status;
+  }
+  if (session->chat_size == 0) {
+    return SHOOTS_OK;
+  }
+  size_t snapshot_len = session->chat_size;
+  if (snapshot_len > SIZE_MAX - 1) {
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot size overflow");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  char *buffer = (char *)shoots_engine_alloc_internal(
+      session->engine, snapshot_len + 1, out_error);
+  if (buffer == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  size_t first_chunk = session->chat_capacity - session->chat_head;
+  if (first_chunk > snapshot_len) {
+    first_chunk = snapshot_len;
+  }
+  memcpy(buffer, session->chat_buffer + session->chat_head, first_chunk);
+  if (first_chunk < snapshot_len) {
+    memcpy(buffer + first_chunk, session->chat_buffer, snapshot_len - first_chunk);
+  }
+  buffer[snapshot_len] = '\0';
+  *out_buffer = buffer;
+  *out_length = snapshot_len;
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_session_chat_clear_internal(
+  shoots_session_t *session,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (session == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t session_status =
+      shoots_validate_session(session->engine, session, out_error);
+  if (session_status != SHOOTS_OK) {
+    return session_status;
+  }
+  if (session->chat_capacity > 0 && session->chat_buffer != NULL) {
+    memset(session->chat_buffer, 0, session->chat_capacity);
+  }
+  session->chat_size = 0;
+  session->chat_head = 0;
+  shoots_assert_invariants(session->engine);
   return SHOOTS_OK;
 }
 

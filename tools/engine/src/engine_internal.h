@@ -48,6 +48,10 @@ struct shoots_session {
   shoots_session_mode_t mode;
   char *intent_id;
   char *last_error;
+  char *chat_buffer;
+  size_t chat_capacity;
+  size_t chat_size;
+  size_t chat_head;
   struct shoots_session *next;
 };
 
@@ -88,6 +92,21 @@ shoots_error_code_t shoots_session_attach_internal(
 
 shoots_error_code_t shoots_session_close_internal(
   shoots_engine_t *engine,
+  struct shoots_session *session,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_chat_append_internal(
+  struct shoots_session *session,
+  const char *text,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_chat_snapshot_internal(
+  struct shoots_session *session,
+  char **out_buffer,
+  size_t *out_length,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_chat_clear_internal(
   struct shoots_session *session,
   shoots_error_info_t *out_error);
 
