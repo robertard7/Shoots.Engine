@@ -399,7 +399,12 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   }
 
   if (engine->provider_runtime != NULL) {
-    shoots_error_code_t runtime_status = shoots_provider_runtime_destroy(
+    shoots_error_code_t runtime_status = shoots_provider_runtime_validate_ready(
+        engine->provider_runtime, out_error);
+    if (runtime_status != SHOOTS_OK) {
+      return runtime_status;
+    }
+    runtime_status = shoots_provider_runtime_destroy(
         engine, engine->provider_runtime, out_error);
     if (runtime_status != SHOOTS_OK) {
       return runtime_status;
