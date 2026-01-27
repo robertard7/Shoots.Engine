@@ -2,10 +2,12 @@ cmake_minimum_required(VERSION 3.20)
 
 add_library(shoots_engine_static STATIC
   src/engine.c
+  src/provider_runtime.c
 )
 
 add_library(shoots_engine_shared SHARED
   src/engine.c
+  src/provider_runtime.c
 )
 
 set_target_properties(shoots_engine_static PROPERTIES
