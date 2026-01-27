@@ -9,6 +9,7 @@ This repository is intentionally minimal.
 - Contain no inference, embedding, or model execution logic.
 - Treat the task board as the authoritative roadmap.
 - Preserve deterministic, embeddable constraints.
+- Treat lifecycle semantics as locked for ABI stability.
 
 Everything else comes later.
 

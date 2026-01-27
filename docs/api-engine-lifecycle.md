@@ -19,6 +19,15 @@ The engine lifecycle defines how a host creates, uses, and destroys an engine in
 - After shutdown, the handle is invalid and must not be reused.
 - A second destroy call returns a deterministic invalid-state error.
 
+## Post-Destroy Call Matrix
+- **Allowed**: None (all calls after destroy return invalid-state errors).
+- **Forbidden**: All engine API calls, including destroy and free, must return deterministic invalid-state errors.
+
+## Invalid Handle Behavior
+- **Null handle**: Deterministic invalid-argument error.
+- **Invalid magic**: Deterministic invalid-argument error.
+- **Destroyed handle**: Deterministic invalid-state error.
+
 ## Ownership Rules
 - The host owns the lifecycle and is responsible for calling create and destroy.
 - The engine owns only resources it explicitly allocates during its lifetime.

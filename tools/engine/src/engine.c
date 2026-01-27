@@ -2,6 +2,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#ifndef NDEBUG
+#include <assert.h>
+#endif
 
 #define SHOOTS_ENGINE_MAGIC 0x53484f4fu
 #define SHOOTS_ENGINE_MAGIC_DESTROYED 0x44454ad1u
@@ -35,6 +38,57 @@ static void shoots_error_set(shoots_error_info_t *out_error,
   out_error->message = message;
 }
 
+static void shoots_assert_invariants(const shoots_engine_t *engine) {
+#ifndef NDEBUG
+  if (engine == NULL) {
+    return;
+  }
+  assert(engine->memory_used_bytes <= engine->memory_limit_bytes);
+  if (engine->state == SHOOTS_ENGINE_STATE_INITIALIZED &&
+      engine->allocations_head == NULL) {
+    assert(engine->memory_used_bytes == sizeof(*engine));
+  }
+  const shoots_alloc_header_t *slow = (const shoots_alloc_header_t *)engine->allocations_head;
+  const shoots_alloc_header_t *fast = (const shoots_alloc_header_t *)engine->allocations_head;
+  while (fast != NULL && fast->next != NULL) {
+    slow = slow->next;
+    fast = fast->next->next;
+    assert(slow != fast);
+  }
+  const shoots_alloc_header_t *cursor =
+      (const shoots_alloc_header_t *)engine->allocations_head;
+  while (cursor != NULL) {
+    assert(cursor->magic == SHOOTS_ALLOC_MAGIC);
+    cursor = cursor->next;
+  }
+#endif
+}
+
+static shoots_error_code_t shoots_validate_engine(shoots_engine_t *engine,
+                                                  shoots_error_info_t *out_error) {
+  if (engine == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "engine is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (engine->magic == SHOOTS_ENGINE_MAGIC_DESTROYED) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "engine destroyed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (engine->magic != SHOOTS_ENGINE_MAGIC) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "engine handle invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (engine->state != SHOOTS_ENGINE_STATE_INITIALIZED) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "engine state invalid");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  return SHOOTS_OK;
+}
+
 static shoots_error_code_t shoots_validate_config(const shoots_config_t *config,
                                                   shoots_error_info_t *out_error) {
   if (config == NULL) {
@@ -59,10 +113,9 @@ static shoots_error_code_t shoots_validate_config(const shoots_config_t *config,
 static shoots_error_code_t shoots_reserve_memory(shoots_engine_t *engine,
                                                  size_t bytes,
                                                  shoots_error_info_t *out_error) {
-  if (engine == NULL) {
-    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
-                     "engine is null");
-    return SHOOTS_ERR_INVALID_STATE;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
   }
   if (engine->memory_used_bytes > engine->memory_limit_bytes) {
     shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
@@ -80,6 +133,7 @@ static shoots_error_code_t shoots_reserve_memory(shoots_engine_t *engine,
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   engine->memory_used_bytes += bytes;
+  shoots_assert_invariants(engine);
   return SHOOTS_OK;
 }
 
@@ -144,6 +198,7 @@ static void shoots_engine_alloc_free(shoots_engine_t *engine, void *buffer) {
     return;
   }
   shoots_release_memory(engine, header->total_size);
+  shoots_assert_invariants(engine);
   header->magic = 0;
   free(header);
 }
@@ -158,6 +213,7 @@ static void shoots_engine_release_all(shoots_engine_t *engine) {
     cursor = next;
   }
   engine->allocations_head = NULL;
+  shoots_assert_invariants(engine);
 }
 
 shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
@@ -216,16 +272,9 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
 shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
                                           shoots_error_info_t *out_error) {
   shoots_error_clear(out_error);
-  if (engine == NULL) {
-    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
-                     "engine is null");
-    return SHOOTS_ERR_INVALID_ARGUMENT;
-  }
-  if (engine->magic != SHOOTS_ENGINE_MAGIC ||
-      engine->state != SHOOTS_ENGINE_STATE_INITIALIZED) {
-    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
-                     "engine state invalid");
-    return SHOOTS_ERR_INVALID_STATE;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
   }
 
   engine->state = SHOOTS_ENGINE_STATE_DESTROYED;
@@ -242,16 +291,9 @@ shoots_error_code_t shoots_engine_free(shoots_engine_t *engine,
                                        void *buffer,
                                        shoots_error_info_t *out_error) {
   shoots_error_clear(out_error);
-  if (engine == NULL) {
-    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
-                     "engine is null");
-    return SHOOTS_ERR_INVALID_ARGUMENT;
-  }
-  if (engine->magic != SHOOTS_ENGINE_MAGIC ||
-      engine->state != SHOOTS_ENGINE_STATE_INITIALIZED) {
-    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
-                     "engine state invalid");
-    return SHOOTS_ERR_INVALID_STATE;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
   }
   if (buffer == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
