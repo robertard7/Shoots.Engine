@@ -12,6 +12,8 @@
 #define SHOOTS_ALLOC_MAGIC 0x53484f41u
 #define SHOOTS_MODEL_MAGIC 0x53484f4du
 #define SHOOTS_MODEL_MAGIC_DESTROYED 0x4d4f4444u
+#define SHOOTS_SESSION_MAGIC 0x53485353u
+#define SHOOTS_SESSION_MAGIC_DESTROYED 0x53445353u
 
 typedef struct shoots_alloc_header {
   size_t payload_size;
@@ -74,6 +76,12 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
   } else {
     assert(engine->models_tail != NULL);
     assert(engine->models_tail->next == NULL);
+  }
+  if (engine->sessions_head == NULL) {
+    assert(engine->sessions_tail == NULL);
+  } else {
+    assert(engine->sessions_tail != NULL);
+    assert(engine->sessions_tail->next == NULL);
   }
 #endif
 }
@@ -155,6 +163,32 @@ static shoots_error_code_t shoots_validate_model(shoots_engine_t *engine,
   return SHOOTS_OK;
 }
 
+static shoots_error_code_t shoots_validate_session(shoots_engine_t *engine,
+                                                   shoots_session_t *session,
+                                                   shoots_error_info_t *out_error) {
+  if (session == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (session->magic == SHOOTS_SESSION_MAGIC_DESTROYED) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session destroyed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (session->magic != SHOOTS_SESSION_MAGIC) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session handle invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (session->engine != engine) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session owned by different engine");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  return SHOOTS_OK;
+}
+
 static void shoots_register_model(shoots_engine_t *engine, shoots_model_t *model) {
   if (engine->models_tail == NULL) {
     engine->models_head = model;
@@ -185,6 +219,27 @@ static int shoots_unregister_model(shoots_engine_t *engine, shoots_model_t *mode
     cursor = cursor->next;
   }
   return 0;
+}
+
+static void shoots_register_session(shoots_engine_t *engine, shoots_session_t *session) {
+  if (engine->sessions_tail == NULL) {
+    engine->sessions_head = session;
+    engine->sessions_tail = session;
+    return;
+  }
+  engine->sessions_tail->next = session;
+  engine->sessions_tail = session;
+}
+
+static shoots_session_t *shoots_find_session(shoots_engine_t *engine, uint64_t session_id) {
+  shoots_session_t *cursor = engine->sessions_head;
+  while (cursor != NULL) {
+    if (cursor->session_id == session_id) {
+      return cursor;
+    }
+    cursor = cursor->next;
+  }
+  return NULL;
 }
 
 static shoots_error_code_t shoots_reserve_memory(shoots_engine_t *engine,
@@ -358,6 +413,9 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->provider_runtime = NULL;
   engine->models_head = NULL;
   engine->models_tail = NULL;
+  engine->sessions_head = NULL;
+  engine->sessions_tail = NULL;
+  engine->next_session_id = 1;
 
   engine->config = *config;
   engine->model_root_path = NULL;
@@ -423,6 +481,9 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   engine->model_root_path = NULL;
   shoots_engine_release_all(engine);
   memset(&engine->config, 0, sizeof(engine->config));
+  engine->sessions_head = NULL;
+  engine->sessions_tail = NULL;
+  engine->next_session_id = 0;
   engine->memory_used_bytes = 0;
   engine->memory_limit_bytes = 0;
   shoots_assert_invariants(engine);
@@ -528,6 +589,139 @@ shoots_error_code_t shoots_model_unload(shoots_engine_t *engine,
   model->state = SHOOTS_MODEL_STATE_DESTROYED;
   model->magic = SHOOTS_MODEL_MAGIC_DESTROYED;
   shoots_engine_alloc_free_internal(engine, model);
+  shoots_assert_invariants(engine);
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_session_create_internal(
+  shoots_engine_t *engine,
+  const char *intent_id,
+  shoots_session_mode_t mode,
+  shoots_session_t **out_session,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_session == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "out_session is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_session = NULL;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (intent_id == NULL || intent_id[0] == '\0') {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "intent_id is null or empty");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (mode < SHOOTS_SESSION_MODE_UNSPECIFIED ||
+      mode > SHOOTS_SESSION_MODE_TRANSACTIONAL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session mode invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (engine->next_session_id == 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session id exhausted");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+
+  shoots_session_t *session = (shoots_session_t *)shoots_engine_alloc_internal(
+      engine, sizeof(*session), out_error);
+  if (session == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memset(session, 0, sizeof(*session));
+  session->magic = SHOOTS_SESSION_MAGIC;
+  session->engine = engine;
+  session->state = SHOOTS_SESSION_STATE_ACTIVE;
+  session->mode = mode;
+  session->session_id = engine->next_session_id;
+  if (engine->next_session_id == UINT64_MAX) {
+    engine->next_session_id = 0;
+  } else {
+    engine->next_session_id++;
+  }
+
+  size_t intent_len = strlen(intent_id);
+  char *intent_copy = (char *)shoots_engine_alloc_internal(
+      engine, intent_len + 1, out_error);
+  if (intent_copy == NULL) {
+    session->magic = SHOOTS_SESSION_MAGIC_DESTROYED;
+    shoots_engine_alloc_free_internal(engine, session);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memcpy(intent_copy, intent_id, intent_len + 1);
+  session->intent_id = intent_copy;
+  session->last_error = NULL;
+  session->next = NULL;
+
+  shoots_register_session(engine, session);
+  shoots_assert_invariants(engine);
+  *out_session = session;
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_session_attach_internal(
+  shoots_engine_t *engine,
+  uint64_t session_id,
+  shoots_session_t **out_session,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_session == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "out_session is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_session = NULL;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (session_id == 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session_id is invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_session_t *session = shoots_find_session(engine, session_id);
+  if (session == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session not found");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t session_status = shoots_validate_session(engine, session, out_error);
+  if (session_status != SHOOTS_OK) {
+    return session_status;
+  }
+  if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session not active");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  *out_session = session;
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_session_close_internal(
+  shoots_engine_t *engine,
+  shoots_session_t *session,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  shoots_error_code_t session_status = shoots_validate_session(engine, session, out_error);
+  if (session_status != SHOOTS_OK) {
+    return session_status;
+  }
+  if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session not active");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  session->state = SHOOTS_SESSION_STATE_CLOSED;
   shoots_assert_invariants(engine);
   return SHOOTS_OK;
 }

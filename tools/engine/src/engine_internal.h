@@ -20,11 +20,35 @@ typedef enum shoots_model_state {
   SHOOTS_MODEL_STATE_DESTROYED = 2
 } shoots_model_state_t;
 
+typedef enum shoots_session_state {
+  SHOOTS_SESSION_STATE_UNINITIALIZED = 0,
+  SHOOTS_SESSION_STATE_ACTIVE = 1,
+  SHOOTS_SESSION_STATE_CLOSED = 2,
+  SHOOTS_SESSION_STATE_DESTROYED = 3
+} shoots_session_state_t;
+
+typedef enum shoots_session_mode {
+  SHOOTS_SESSION_MODE_UNSPECIFIED = 0,
+  SHOOTS_SESSION_MODE_CONTINUATION = 1,
+  SHOOTS_SESSION_MODE_TRANSACTIONAL = 2
+} shoots_session_mode_t;
+
 struct shoots_model {
   uint32_t magic;
   shoots_engine_t *engine;
   shoots_model_state_t state;
   struct shoots_model *next;
+};
+
+struct shoots_session {
+  uint32_t magic;
+  uint64_t session_id;
+  shoots_engine_t *engine;
+  shoots_session_state_t state;
+  shoots_session_mode_t mode;
+  char *intent_id;
+  char *last_error;
+  struct shoots_session *next;
 };
 
 struct shoots_engine {
@@ -36,6 +60,9 @@ struct shoots_engine {
   shoots_provider_runtime_t *provider_runtime;
   struct shoots_model *models_head;
   struct shoots_model *models_tail;
+  struct shoots_session *sessions_head;
+  struct shoots_session *sessions_tail;
+  uint64_t next_session_id;
   shoots_engine_state_t state;
   uint32_t magic;
 };
@@ -45,5 +72,23 @@ void *shoots_engine_alloc_internal(shoots_engine_t *engine,
                                    shoots_error_info_t *out_error);
 
 void shoots_engine_alloc_free_internal(shoots_engine_t *engine, void *buffer);
+
+shoots_error_code_t shoots_session_create_internal(
+  shoots_engine_t *engine,
+  const char *intent_id,
+  shoots_session_mode_t mode,
+  struct shoots_session **out_session,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_attach_internal(
+  shoots_engine_t *engine,
+  uint64_t session_id,
+  struct shoots_session **out_session,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_close_internal(
+  shoots_engine_t *engine,
+  struct shoots_session *session,
+  shoots_error_info_t *out_error);
 
 #endif
