@@ -404,8 +404,6 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
     if (runtime_status != SHOOTS_OK) {
       return runtime_status;
     }
-    shoots_engine_alloc_free_internal(engine, engine->provider_runtime);
-    engine->provider_runtime = NULL;
   }
 
   shoots_assert_invariants(engine);
@@ -432,6 +430,11 @@ shoots_error_code_t shoots_engine_free(shoots_engine_t *engine,
   if (buffer == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "buffer is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (buffer == engine->provider_runtime) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "buffer not owned by engine");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   shoots_alloc_header_t *header = ((shoots_alloc_header_t *)buffer) - 1;
