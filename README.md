@@ -106,3 +106,5 @@ Key points:
 - CI logs are the single source of truth
 
 See:
+- [docs/codex-operating-policy.md](docs/codex-operating-policy.md)
+- [docs/GOALS.md](docs/GOALS.md)

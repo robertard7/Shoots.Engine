@@ -1,16 +1,15 @@
-
 ---
 
 ## Status
 
 This repository is intentionally minimal.
 
-The first milestone is:
-- A compilable core engine
-- Deterministic inference API
-- Deterministic embedding API
-- No networking
-- No Shoots integration yet
+**Phase 4 (Deterministic Core Implementation) is active.** The repository must:
+- Implement only engine lifecycle, configuration validation, and memory accounting.
+- Contain no inference, embedding, or model execution logic.
+- Treat the task board as the authoritative roadmap.
+- Preserve deterministic, embeddable constraints.
+- Treat lifecycle semantics as locked for ABI stability.
 
 Everything else comes later.
 
