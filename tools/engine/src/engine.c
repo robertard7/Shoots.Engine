@@ -156,14 +156,34 @@ static void shoots_release_memory(shoots_engine_t *engine, size_t bytes) {
 static void *shoots_engine_alloc(shoots_engine_t *engine,
                                  size_t bytes,
                                  shoots_error_info_t *out_error) {
+#ifndef NDEBUG
+  size_t prior_memory_used = 0;
+  void *prior_allocations_head = NULL;
+  if (engine != NULL) {
+    prior_memory_used = engine->memory_used_bytes;
+    prior_allocations_head = engine->allocations_head;
+  }
+#endif
   if (bytes > SIZE_MAX - sizeof(shoots_alloc_header_t)) {
     shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
                      "allocation size overflow");
+#ifndef NDEBUG
+    if (engine != NULL) {
+      assert(engine->memory_used_bytes == prior_memory_used);
+      assert(engine->allocations_head == prior_allocations_head);
+    }
+#endif
     return NULL;
   }
   size_t total = bytes + sizeof(shoots_alloc_header_t);
   shoots_error_code_t reserve = shoots_reserve_memory(engine, total, out_error);
   if (reserve != SHOOTS_OK) {
+#ifndef NDEBUG
+    if (engine != NULL) {
+      assert(engine->memory_used_bytes == prior_memory_used);
+      assert(engine->allocations_head == prior_allocations_head);
+    }
+#endif
     return NULL;
   }
   shoots_alloc_header_t *header = (shoots_alloc_header_t *)malloc(total);
@@ -171,6 +191,12 @@ static void *shoots_engine_alloc(shoots_engine_t *engine,
     shoots_release_memory(engine, total);
     shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
                      "allocation failed");
+#ifndef NDEBUG
+    if (engine != NULL) {
+      assert(engine->memory_used_bytes == prior_memory_used);
+      assert(engine->allocations_head == prior_allocations_head);
+    }
+#endif
     return NULL;
   }
   header->payload_size = bytes;
