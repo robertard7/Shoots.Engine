@@ -95,6 +95,10 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
       assert(cursor->chat_size <= cursor->chat_capacity);
       if (cursor->state == SHOOTS_SESSION_STATE_ACTIVE) {
         assert(cursor->next_execution_slot != 0);
+        if (cursor->has_active_execution) {
+          assert(cursor->active_execution_slot != 0);
+          assert(cursor->active_execution_slot < cursor->next_execution_slot);
+        }
       }
       cursor = cursor->next;
     }
@@ -1008,6 +1012,8 @@ shoots_error_code_t shoots_session_create_internal(
   memcpy(intent_copy, intent_id, intent_len + 1);
   session->intent_id = intent_copy;
   session->last_error = NULL;
+  session->active_execution_slot = 0;
+  session->has_active_execution = 0;
   session->chat_capacity = SHOOTS_SESSION_CHAT_CAPACITY;
   session->chat_size = 0;
   session->chat_head = 0;
@@ -1474,6 +1480,22 @@ shoots_error_code_t shoots_command_append_internal(
   if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "session not active");
+    shoots_emit_command_error(engine, session, "session not active",
+                              "command failure: session not active");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (!shoots_intent_exists(engine, session->intent_id)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "intent record missing");
+    shoots_emit_command_error(engine, session, "intent record missing",
+                              "command failure: intent missing");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (session->has_active_execution) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session execution already active");
+    shoots_emit_command_error(engine, session, "session execution already active",
+                              "command failure: execution already active");
     return SHOOTS_ERR_INVALID_STATE;
   }
   if (execution_slot == 0) {
@@ -1566,6 +1588,8 @@ shoots_error_code_t shoots_command_append_internal(
   } else {
     session->next_execution_slot++;
   }
+  session->has_active_execution = 1;
+  session->active_execution_slot = execution_slot;
 
   char *command_id_copy = (char *)shoots_engine_alloc_internal(
       engine, command_id_len + 1, out_error);
@@ -1621,6 +1645,22 @@ shoots_error_code_t shoots_result_append_internal(
   if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "session not active");
+    shoots_emit_command_error(engine, session, "session not active",
+                              "result failure: session not active");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (!shoots_intent_exists(engine, session->intent_id)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "intent record missing");
+    shoots_emit_command_error(engine, session, "intent record missing",
+                              "result failure: intent missing");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (!session->has_active_execution) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session execution not active");
+    shoots_emit_command_error(engine, session, "session execution not active",
+                              "result failure: execution not active");
     return SHOOTS_ERR_INVALID_STATE;
   }
   if (command_id == NULL || command_id[0] == '\0') {
@@ -1737,6 +1777,8 @@ shoots_error_code_t shoots_result_append_internal(
                                   "command failure: result error",
                                   &error_entry, NULL);
   }
+  session->has_active_execution = 0;
+  session->active_execution_slot = 0;
   shoots_assert_invariants(engine);
   *out_record = record;
   return SHOOTS_OK;

@@ -93,6 +93,8 @@ struct shoots_session {
   char *intent_id;
   char *last_error;
   uint64_t next_execution_slot;
+  uint64_t active_execution_slot;
+  uint8_t has_active_execution;
   char *chat_buffer;
   size_t chat_capacity;
   size_t chat_size;
