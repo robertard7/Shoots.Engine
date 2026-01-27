@@ -10,6 +10,7 @@ This repository is intentionally minimal.
 - Treat the task board as the authoritative roadmap.
 - Preserve deterministic, embeddable constraints.
 - Treat lifecycle semantics as locked for ABI stability.
+- Treat model handle load/unload and engine destroy semantics as locked for this phase.
 
 Everything else comes later.
 

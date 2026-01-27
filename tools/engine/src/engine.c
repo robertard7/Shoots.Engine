@@ -9,6 +9,8 @@
 #define SHOOTS_ENGINE_MAGIC 0x53484f4fu
 #define SHOOTS_ENGINE_MAGIC_DESTROYED 0x44454ad1u
 #define SHOOTS_ALLOC_MAGIC 0x53484f41u
+#define SHOOTS_MODEL_MAGIC 0x53484f4du
+#define SHOOTS_MODEL_MAGIC_DESTROYED 0x4d4f4444u
 
 typedef struct shoots_alloc_header {
   size_t payload_size;
@@ -66,6 +68,12 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     assert(cursor->magic == SHOOTS_ALLOC_MAGIC);
     cursor = cursor->next;
   }
+  if (engine->models_head == NULL) {
+    assert(engine->models_tail == NULL);
+  } else {
+    assert(engine->models_tail != NULL);
+    assert(engine->models_tail->next == NULL);
+  }
 #endif
 }
 
@@ -113,6 +121,69 @@ static shoots_error_code_t shoots_validate_config(const shoots_config_t *config,
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   return SHOOTS_OK;
+}
+
+static shoots_error_code_t shoots_validate_model(shoots_engine_t *engine,
+                                                 shoots_model_t *model,
+                                                 shoots_error_info_t *out_error) {
+  if (model == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "model is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (model->magic == SHOOTS_MODEL_MAGIC_DESTROYED) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "model destroyed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (model->magic != SHOOTS_MODEL_MAGIC) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "model handle invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (model->engine != engine) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "model owned by different engine");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (model->state != SHOOTS_MODEL_STATE_LOADED) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "model state invalid");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  return SHOOTS_OK;
+}
+
+static void shoots_register_model(shoots_engine_t *engine, shoots_model_t *model) {
+  if (engine->models_tail == NULL) {
+    engine->models_head = model;
+    engine->models_tail = model;
+    return;
+  }
+  engine->models_tail->next = model;
+  engine->models_tail = model;
+}
+
+static int shoots_unregister_model(shoots_engine_t *engine, shoots_model_t *model) {
+  shoots_model_t *prev = NULL;
+  shoots_model_t *cursor = engine->models_head;
+  while (cursor != NULL) {
+    if (cursor == model) {
+      if (prev == NULL) {
+        engine->models_head = cursor->next;
+      } else {
+        prev->next = cursor->next;
+      }
+      if (engine->models_tail == cursor) {
+        engine->models_tail = prev;
+      }
+      cursor->next = NULL;
+      return 1;
+    }
+    prev = cursor;
+    cursor = cursor->next;
+  }
+  return 0;
 }
 
 static shoots_error_code_t shoots_reserve_memory(shoots_engine_t *engine,
@@ -283,6 +354,8 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->state = SHOOTS_ENGINE_STATE_INITIALIZED;
   engine->magic = SHOOTS_ENGINE_MAGIC;
   engine->allocations_head = NULL;
+  engine->models_head = NULL;
+  engine->models_tail = NULL;
 
   engine->config = *config;
   engine->model_root_path = NULL;
@@ -308,6 +381,11 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
   if (engine_status != SHOOTS_OK) {
     return engine_status;
+  }
+  if (engine->models_head != NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "models still loaded");
+    return SHOOTS_ERR_INVALID_STATE;
   }
 
   shoots_assert_invariants(engine);
@@ -357,5 +435,66 @@ shoots_error_code_t shoots_engine_free(shoots_engine_t *engine,
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   shoots_engine_alloc_free(engine, buffer);
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_model_load(shoots_engine_t *engine,
+                                      const char *model_identifier,
+                                      shoots_model_t **out_model,
+                                      shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_model == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "out_model is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_model = NULL;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (model_identifier == NULL || model_identifier[0] == '\0') {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "model_identifier is null or empty");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+
+  shoots_model_t *model = (shoots_model_t *)shoots_engine_alloc(
+      engine, sizeof(*model), out_error);
+  if (model == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memset(model, 0, sizeof(*model));
+  model->magic = SHOOTS_MODEL_MAGIC;
+  model->engine = engine;
+  model->state = SHOOTS_MODEL_STATE_LOADED;
+  model->next = NULL;
+  shoots_register_model(engine, model);
+  shoots_assert_invariants(engine);
+  *out_model = model;
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_model_unload(shoots_engine_t *engine,
+                                        shoots_model_t *model,
+                                        shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  shoots_error_code_t model_status = shoots_validate_model(engine, model, out_error);
+  if (model_status != SHOOTS_OK) {
+    return model_status;
+  }
+  if (!shoots_unregister_model(engine, model)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "model not registered");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  model->state = SHOOTS_MODEL_STATE_DESTROYED;
+  model->magic = SHOOTS_MODEL_MAGIC_DESTROYED;
+  shoots_engine_alloc_free(engine, model);
+  shoots_assert_invariants(engine);
   return SHOOTS_OK;
 }

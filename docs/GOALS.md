@@ -6,6 +6,7 @@
 - Track engine-owned memory against configured limits.
 - Keep inference and embedding logic out of the codebase.
 - Lock lifecycle behavior for ABI stability.
+- Provide deterministic model handle load/unload with engine-owned registry.
 
 ## Explicitly Deferred
 - Any inference or embedding implementation.
