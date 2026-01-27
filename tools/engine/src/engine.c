@@ -266,6 +266,7 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->config.model_root_path = engine->model_root_path;
 
   *out_engine = engine;
+  shoots_assert_invariants(engine);
   return SHOOTS_OK;
 }
 
@@ -284,6 +285,7 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   shoots_engine_release_all(engine);
   engine->memory_used_bytes = 0;
   engine->memory_limit_bytes = 0;
+  shoots_assert_invariants(engine);
   return SHOOTS_OK;
 }
 
