@@ -33,6 +33,14 @@ typedef enum shoots_session_mode {
   SHOOTS_SESSION_MODE_TRANSACTIONAL = 2
 } shoots_session_mode_t;
 
+typedef enum shoots_ledger_entry_type {
+  SHOOTS_LEDGER_ENTRY_DECISION = 0,
+  SHOOTS_LEDGER_ENTRY_CONSTRAINT = 1,
+  SHOOTS_LEDGER_ENTRY_COMMAND = 2,
+  SHOOTS_LEDGER_ENTRY_RESULT = 3,
+  SHOOTS_LEDGER_ENTRY_ERROR = 4
+} shoots_ledger_entry_type_t;
+
 struct shoots_model {
   uint32_t magic;
   shoots_engine_t *engine;
@@ -55,6 +63,14 @@ struct shoots_session {
   struct shoots_session *next;
 };
 
+struct shoots_ledger_entry {
+  uint64_t entry_id;
+  shoots_ledger_entry_type_t type;
+  char *payload;
+  size_t payload_len;
+  struct shoots_ledger_entry *next;
+};
+
 struct shoots_engine {
   shoots_config_t config;
   char *model_root_path;
@@ -67,6 +83,11 @@ struct shoots_engine {
   struct shoots_session *sessions_head;
   struct shoots_session *sessions_tail;
   uint64_t next_session_id;
+  struct shoots_ledger_entry *ledger_head;
+  struct shoots_ledger_entry *ledger_tail;
+  size_t ledger_entry_count;
+  size_t ledger_total_bytes;
+  uint64_t next_ledger_id;
   shoots_engine_state_t state;
   uint32_t magic;
 };
@@ -108,6 +129,27 @@ shoots_error_code_t shoots_session_chat_snapshot_internal(
 
 shoots_error_code_t shoots_session_chat_clear_internal(
   struct shoots_session *session,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_ledger_append_internal(
+  shoots_engine_t *engine,
+  shoots_ledger_entry_type_t type,
+  const char *payload,
+  struct shoots_ledger_entry **out_entry,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_ledger_query_type_internal(
+  shoots_engine_t *engine,
+  shoots_ledger_entry_type_t type,
+  struct shoots_ledger_entry ***out_entries,
+  size_t *out_count,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_ledger_query_substring_internal(
+  shoots_engine_t *engine,
+  const char *substring,
+  struct shoots_ledger_entry ***out_entries,
+  size_t *out_count,
   shoots_error_info_t *out_error);
 
 #endif
