@@ -7,8 +7,10 @@
 #define SHOOTS_ALLOC_MAGIC 0x53484f41u
 
 typedef struct shoots_alloc_header {
-  size_t size;
+  size_t payload_size;
+  size_t total_size;
   uint32_t magic;
+  struct shoots_alloc_header *next;
 } shoots_alloc_header_t;
 
 static void shoots_error_clear(shoots_error_info_t *out_error) {
@@ -61,9 +63,19 @@ static shoots_error_code_t shoots_reserve_memory(shoots_engine_t *engine,
                      "engine is null");
     return SHOOTS_ERR_INVALID_STATE;
   }
+  if (engine->memory_used_bytes > engine->memory_limit_bytes) {
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "memory accounting invalid");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
   if (bytes > engine->memory_limit_bytes - engine->memory_used_bytes) {
     shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
                      "memory limit exceeded");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  if (bytes > SIZE_MAX - engine->memory_used_bytes) {
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "memory accounting overflow");
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   engine->memory_used_bytes += bytes;
@@ -84,25 +96,28 @@ static void shoots_release_memory(shoots_engine_t *engine, size_t bytes) {
 static void *shoots_engine_alloc(shoots_engine_t *engine,
                                  size_t bytes,
                                  shoots_error_info_t *out_error) {
-  shoots_error_code_t reserve = shoots_reserve_memory(engine, bytes, out_error);
-  if (reserve != SHOOTS_OK) {
-    return NULL;
-  }
   if (bytes > SIZE_MAX - sizeof(shoots_alloc_header_t)) {
-    shoots_release_memory(engine, bytes);
     shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
                      "allocation size overflow");
     return NULL;
   }
-  shoots_alloc_header_t *header = (shoots_alloc_header_t *)malloc(sizeof(*header) + bytes);
+  size_t total = bytes + sizeof(shoots_alloc_header_t);
+  shoots_error_code_t reserve = shoots_reserve_memory(engine, total, out_error);
+  if (reserve != SHOOTS_OK) {
+    return NULL;
+  }
+  shoots_alloc_header_t *header = (shoots_alloc_header_t *)malloc(total);
   if (header == NULL) {
-    shoots_release_memory(engine, bytes);
+    shoots_release_memory(engine, total);
     shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
                      "allocation failed");
     return NULL;
   }
-  header->size = bytes;
+  header->payload_size = bytes;
+  header->total_size = total;
   header->magic = SHOOTS_ALLOC_MAGIC;
+  header->next = (shoots_alloc_header_t *)engine->allocations_head;
+  engine->allocations_head = header;
   return (void *)(header + 1);
 }
 
@@ -114,9 +129,29 @@ static void shoots_engine_alloc_free(shoots_engine_t *engine, void *buffer) {
   if (header->magic != SHOOTS_ALLOC_MAGIC) {
     return;
   }
-  shoots_release_memory(engine, header->size);
+  shoots_alloc_header_t **cursor = (shoots_alloc_header_t **)&engine->allocations_head;
+  while (*cursor != NULL) {
+    if (*cursor == header) {
+      *cursor = header->next;
+      break;
+    }
+    cursor = &(*cursor)->next;
+  }
+  shoots_release_memory(engine, header->total_size);
   header->magic = 0;
   free(header);
+}
+
+static void shoots_engine_release_all(shoots_engine_t *engine) {
+  shoots_alloc_header_t *cursor = (shoots_alloc_header_t *)engine->allocations_head;
+  while (cursor != NULL) {
+    shoots_alloc_header_t *next = cursor->next;
+    shoots_release_memory(engine, cursor->total_size);
+    cursor->magic = 0;
+    free(cursor);
+    cursor = next;
+  }
+  engine->allocations_head = NULL;
 }
 
 shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
@@ -153,6 +188,7 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->memory_used_bytes = sizeof(*engine);
   engine->state = SHOOTS_ENGINE_STATE_INITIALIZED;
   engine->magic = SHOOTS_ENGINE_MAGIC;
+  engine->allocations_head = NULL;
 
   engine->config = *config;
   engine->model_root_path = NULL;
@@ -189,8 +225,8 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   engine->state = SHOOTS_ENGINE_STATE_DESTROYED;
   engine->magic = 0;
 
-  shoots_engine_alloc_free(engine, engine->model_root_path);
   engine->model_root_path = NULL;
+  shoots_engine_release_all(engine);
 
   free(engine);
   return SHOOTS_OK;
@@ -210,6 +246,17 @@ shoots_error_code_t shoots_engine_free(shoots_engine_t *engine,
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "engine state invalid");
     return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (buffer == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "buffer is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_alloc_header_t *header = ((shoots_alloc_header_t *)buffer) - 1;
+  if (header->magic != SHOOTS_ALLOC_MAGIC) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "buffer not owned by engine");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   shoots_engine_alloc_free(engine, buffer);
   return SHOOTS_OK;

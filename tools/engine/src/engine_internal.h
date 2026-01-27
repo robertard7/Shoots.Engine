@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../include/shoots/shoots.h"
+#include "shoots/shoots.h"
 
 typedef enum shoots_engine_state {
   SHOOTS_ENGINE_STATE_UNINITIALIZED = 0,
@@ -17,6 +17,7 @@ struct shoots_engine {
   char *model_root_path;
   size_t memory_used_bytes;
   size_t memory_limit_bytes;
+  void *allocations_head;
   shoots_engine_state_t state;
   uint32_t magic;
 };
