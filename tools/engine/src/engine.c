@@ -762,10 +762,13 @@ shoots_error_code_t shoots_session_chat_append_internal(
                      "session is null");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
-  if (text == NULL || text[0] == '\0') {
+  if (text == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
-                     "text is null or empty");
+                     "text is null");
     return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (text[0] == '\0') {
+    return SHOOTS_OK;
   }
   shoots_error_code_t session_status =
       shoots_validate_session(session->engine, session, out_error);
@@ -778,9 +781,6 @@ shoots_error_code_t shoots_session_chat_append_internal(
     return SHOOTS_ERR_INVALID_STATE;
   }
   size_t text_len = strlen(text);
-  if (text_len == 0) {
-    return SHOOTS_OK;
-  }
   if (session->chat_capacity == 0) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "chat buffer disabled");
