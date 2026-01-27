@@ -1,14 +1,14 @@
 # Goals
 
-## Phase 3 Goals — Repository Skeleton (Minimal)
-- Define a minimal source layout with public vs internal separation.
-- Provide a build system skeleton for static and shared libraries.
-- Publish public header stubs matching the ABI contract.
-- Keep the repository free of implementation logic.
+## Phase 4 Goals — Deterministic Core Implementation
+- Implement engine lifecycle with deterministic create/destroy behavior.
+- Validate configuration inputs with explicit failure on missing values.
+- Track engine-owned memory against configured limits.
+- Keep inference and embedding logic out of the codebase.
 
 ## Explicitly Deferred
 - Any inference or embedding implementation.
-- Full engine runtime behavior.
+- Model execution or tokenization.
 - Tests, harnesses, or CI integration.
 - Host adapters or Shoots integration.
 
