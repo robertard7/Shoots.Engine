@@ -41,6 +41,17 @@ typedef enum shoots_ledger_entry_type {
   SHOOTS_LEDGER_ENTRY_ERROR = 4
 } shoots_ledger_entry_type_t;
 
+typedef struct shoots_command_record {
+  uint64_t command_seq;
+  char *command_id;
+  size_t command_id_len;
+  char *args;
+  size_t args_len;
+  uint8_t has_last_result;
+  int32_t last_result_code;
+  struct shoots_command_record *next;
+} shoots_command_record_t;
+
 struct shoots_model {
   uint32_t magic;
   shoots_engine_t *engine;
@@ -88,6 +99,11 @@ struct shoots_engine {
   size_t ledger_entry_count;
   size_t ledger_total_bytes;
   uint64_t next_ledger_id;
+  shoots_command_record_t *commands_head;
+  shoots_command_record_t *commands_tail;
+  size_t commands_entry_count;
+  size_t commands_total_bytes;
+  uint64_t next_command_seq;
   shoots_engine_state_t state;
   uint32_t magic;
 };
@@ -149,6 +165,22 @@ shoots_error_code_t shoots_ledger_query_substring_internal(
   shoots_engine_t *engine,
   const char *substring,
   struct shoots_ledger_entry ***out_entries,
+  size_t *out_count,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_command_append_internal(
+  shoots_engine_t *engine,
+  const char *command_id,
+  const char *args,
+  uint8_t has_last_result,
+  int32_t last_result_code,
+  shoots_command_record_t **out_record,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_command_fetch_last_internal(
+  shoots_engine_t *engine,
+  size_t max_count,
+  shoots_command_record_t ***out_records,
   size_t *out_count,
   shoots_error_info_t *out_error);
 

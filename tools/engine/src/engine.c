@@ -17,6 +17,8 @@
 #define SHOOTS_SESSION_CHAT_CAPACITY 4096u
 #define SHOOTS_LEDGER_MAX_ENTRIES 256u
 #define SHOOTS_LEDGER_MAX_BYTES 16384u
+#define SHOOTS_COMMAND_MAX_ENTRIES 256u
+#define SHOOTS_COMMAND_MAX_BYTES 16384u
 
 typedef struct shoots_alloc_header {
   size_t payload_size;
@@ -103,6 +105,17 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     assert(engine->ledger_tail->next == NULL);
     assert(engine->ledger_entry_count <= SHOOTS_LEDGER_MAX_ENTRIES);
     assert(engine->ledger_total_bytes <= SHOOTS_LEDGER_MAX_BYTES);
+  }
+  if (engine->commands_entry_count == 0) {
+    assert(engine->commands_head == NULL);
+    assert(engine->commands_tail == NULL);
+    assert(engine->commands_total_bytes == 0);
+  } else {
+    assert(engine->commands_head != NULL);
+    assert(engine->commands_tail != NULL);
+    assert(engine->commands_tail->next == NULL);
+    assert(engine->commands_entry_count <= SHOOTS_COMMAND_MAX_ENTRIES);
+    assert(engine->commands_total_bytes <= SHOOTS_COMMAND_MAX_BYTES);
   }
 #endif
 }
@@ -236,6 +249,16 @@ static void shoots_register_ledger_entry(shoots_engine_t *engine,
   engine->ledger_tail = entry;
 }
 
+static void shoots_register_command(shoots_engine_t *engine, shoots_command_record_t *record) {
+  if (engine->commands_tail == NULL) {
+    engine->commands_head = record;
+    engine->commands_tail = record;
+    return;
+  }
+  engine->commands_tail->next = record;
+  engine->commands_tail = record;
+}
+
 static void shoots_evict_ledger_head(shoots_engine_t *engine) {
   if (engine == NULL || engine->ledger_head == NULL) {
     return;
@@ -257,6 +280,33 @@ static void shoots_evict_ledger_head(shoots_engine_t *engine) {
   entry->payload = NULL;
   entry->payload_len = 0;
   shoots_engine_alloc_free_internal(engine, entry);
+}
+
+static void shoots_evict_command_head(shoots_engine_t *engine) {
+  if (engine == NULL || engine->commands_head == NULL) {
+    return;
+  }
+  shoots_command_record_t *record = engine->commands_head;
+  engine->commands_head = record->next;
+  if (engine->commands_head == NULL) {
+    engine->commands_tail = NULL;
+  }
+  if (engine->commands_entry_count > 0) {
+    engine->commands_entry_count--;
+  }
+  size_t record_bytes = record->command_id_len + record->args_len;
+  if (record_bytes <= engine->commands_total_bytes) {
+    engine->commands_total_bytes -= record_bytes;
+  } else {
+    engine->commands_total_bytes = 0;
+  }
+  shoots_engine_alloc_free_internal(engine, record->command_id);
+  shoots_engine_alloc_free_internal(engine, record->args);
+  record->command_id = NULL;
+  record->args = NULL;
+  record->command_id_len = 0;
+  record->args_len = 0;
+  shoots_engine_alloc_free_internal(engine, record);
 }
 
 static int shoots_unregister_model(shoots_engine_t *engine, shoots_model_t *model) {
@@ -481,6 +531,11 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->ledger_entry_count = 0;
   engine->ledger_total_bytes = 0;
   engine->next_ledger_id = 1;
+  engine->commands_head = NULL;
+  engine->commands_tail = NULL;
+  engine->commands_entry_count = 0;
+  engine->commands_total_bytes = 0;
+  engine->next_command_seq = 1;
 
   engine->config = *config;
   engine->model_root_path = NULL;
@@ -554,6 +609,11 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   engine->ledger_entry_count = 0;
   engine->ledger_total_bytes = 0;
   engine->next_ledger_id = 0;
+  engine->commands_head = NULL;
+  engine->commands_tail = NULL;
+  engine->commands_entry_count = 0;
+  engine->commands_total_bytes = 0;
+  engine->next_command_seq = 0;
   engine->memory_used_bytes = 0;
   engine->memory_limit_bytes = 0;
   shoots_assert_invariants(engine);
@@ -1135,6 +1195,167 @@ shoots_error_code_t shoots_ledger_query_substring_internal(
   }
   *out_entries = entries;
   *out_count = match_count;
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_command_append_internal(
+  shoots_engine_t *engine,
+  const char *command_id,
+  const char *args,
+  uint8_t has_last_result,
+  int32_t last_result_code,
+  shoots_command_record_t **out_record,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_record == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "out_record is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_record = NULL;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (command_id == NULL || command_id[0] == '\0') {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "command_id is null or empty");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (args == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "args is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (has_last_result > 1) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "has_last_result invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (engine->next_command_seq == 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "command sequence exhausted");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  size_t command_id_len = strlen(command_id);
+  size_t args_len = strlen(args);
+  size_t record_bytes = command_id_len + args_len;
+  if (record_bytes > SHOOTS_COMMAND_MAX_BYTES) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "command payload too large");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+
+  while (engine->commands_entry_count >= SHOOTS_COMMAND_MAX_ENTRIES ||
+         engine->commands_total_bytes + record_bytes > SHOOTS_COMMAND_MAX_BYTES) {
+    shoots_evict_command_head(engine);
+  }
+
+  shoots_command_record_t *record =
+      (shoots_command_record_t *)shoots_engine_alloc_internal(
+          engine, sizeof(*record), out_error);
+  if (record == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memset(record, 0, sizeof(*record));
+  record->command_seq = engine->next_command_seq;
+  record->has_last_result = has_last_result;
+  record->last_result_code = last_result_code;
+  record->command_id_len = command_id_len;
+  record->args_len = args_len;
+  record->next = NULL;
+  if (engine->next_command_seq == UINT64_MAX) {
+    engine->next_command_seq = 0;
+  } else {
+    engine->next_command_seq++;
+  }
+
+  char *command_id_copy = (char *)shoots_engine_alloc_internal(
+      engine, command_id_len + 1, out_error);
+  if (command_id_copy == NULL) {
+    shoots_engine_alloc_free_internal(engine, record);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memcpy(command_id_copy, command_id, command_id_len + 1);
+  record->command_id = command_id_copy;
+
+  char *args_copy = (char *)shoots_engine_alloc_internal(
+      engine, args_len + 1, out_error);
+  if (args_copy == NULL) {
+    shoots_engine_alloc_free_internal(engine, record->command_id);
+    record->command_id = NULL;
+    shoots_engine_alloc_free_internal(engine, record);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memcpy(args_copy, args, args_len + 1);
+  record->args = args_copy;
+
+  shoots_register_command(engine, record);
+  engine->commands_entry_count++;
+  engine->commands_total_bytes += record_bytes;
+  shoots_assert_invariants(engine);
+  *out_record = record;
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_command_fetch_last_internal(
+  shoots_engine_t *engine,
+  size_t max_count,
+  shoots_command_record_t ***out_records,
+  size_t *out_count,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_records == NULL || out_count == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "output is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_records = NULL;
+  *out_count = 0;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (max_count == 0) {
+    return SHOOTS_OK;
+  }
+  size_t total = 0;
+  shoots_command_record_t *cursor = engine->commands_head;
+  while (cursor != NULL) {
+    total++;
+    cursor = cursor->next;
+  }
+  if (total == 0) {
+    return SHOOTS_OK;
+  }
+  size_t slice_count = total;
+  if (slice_count > max_count) {
+    slice_count = max_count;
+  }
+  if (slice_count > SIZE_MAX / sizeof(shoots_command_record_t *)) {
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "result size overflow");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  shoots_command_record_t **records =
+      (shoots_command_record_t **)shoots_engine_alloc_internal(
+          engine, slice_count * sizeof(*records), out_error);
+  if (records == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  size_t skip = total - slice_count;
+  cursor = engine->commands_head;
+  while (cursor != NULL && skip > 0) {
+    cursor = cursor->next;
+    skip--;
+  }
+  size_t index = 0;
+  while (cursor != NULL && index < slice_count) {
+    records[index++] = cursor;
+    cursor = cursor->next;
+  }
+  *out_records = records;
+  *out_count = slice_count;
   return SHOOTS_OK;
 }
 
