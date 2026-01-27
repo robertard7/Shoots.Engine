@@ -610,6 +610,22 @@ static void shoots_plan_emit_error(shoots_engine_t *engine, const char *message)
                                 message, &entry, NULL);
 }
 
+static void shoots_engine_emit_execution_denial(shoots_engine_t *engine,
+                                                const char *reason) {
+  if (engine == NULL || reason == NULL || reason[0] == '\0') {
+    return;
+  }
+  char buffer[128];
+  int written = snprintf(buffer, sizeof(buffer),
+                         "execution denied: %s", reason);
+  if (written < 0 || (size_t)written >= sizeof(buffer)) {
+    return;
+  }
+  shoots_ledger_entry_t *entry = NULL;
+  shoots_ledger_append_internal(engine, SHOOTS_LEDGER_ENTRY_ERROR,
+                                buffer, &entry, NULL);
+}
+
 static void shoots_session_set_last_error(shoots_session_t *session, const char *message) {
   if (session == NULL || session->engine == NULL) {
     return;
@@ -2237,6 +2253,83 @@ shoots_error_code_t shoots_plan_internal(
     return ledger_status;
   }
   shoots_assert_invariants(engine);
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_engine_can_execute_internal(
+  shoots_engine_t *engine,
+  shoots_session_t *session,
+  const char *tool_id,
+  const char **out_reason,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_reason == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "out_reason is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_reason = "unknown";
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  shoots_error_code_t session_status = shoots_validate_session(engine, session, out_error);
+  if (session_status != SHOOTS_OK) {
+    *out_reason = "session invalid";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    return session_status;
+  }
+  if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
+    *out_reason = "session not active";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session not active");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (session->next_execution_slot == 0) {
+    *out_reason = "execution slots exhausted";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "execution slots exhausted");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (session->has_active_execution) {
+    *out_reason = "execution already active";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "execution already active");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (tool_id == NULL || tool_id[0] == '\0') {
+    *out_reason = "tool_id invalid";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "tool_id is null or empty");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (shoots_tool_find(engine, tool_id) == NULL) {
+    *out_reason = "tool not found";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "tool not found");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  shoots_tool_arbitration_result_t result = SHOOTS_TOOL_ARBITRATION_REJECT;
+  shoots_error_code_t arb_status = shoots_tool_arbitrate_internal(
+      engine, tool_id, &result, out_error);
+  if (arb_status != SHOOTS_OK) {
+    *out_reason = "tool arbitration failed";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    return arb_status;
+  }
+  if (result != SHOOTS_TOOL_ARBITRATION_ACCEPT) {
+    *out_reason = "tool rejected";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "tool rejected");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  *out_reason = "ok";
   return SHOOTS_OK;
 }
 
