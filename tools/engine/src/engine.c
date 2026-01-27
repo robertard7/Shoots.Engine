@@ -48,6 +48,11 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
       engine->allocations_head == NULL) {
     assert(engine->memory_used_bytes == sizeof(*engine));
   }
+  if (engine->state == SHOOTS_ENGINE_STATE_DESTROYED) {
+    assert(engine->allocations_head == NULL);
+    assert(engine->memory_used_bytes == 0);
+    assert(engine->memory_limit_bytes == 0);
+  }
   const shoots_alloc_header_t *slow = (const shoots_alloc_header_t *)engine->allocations_head;
   const shoots_alloc_header_t *fast = (const shoots_alloc_header_t *)engine->allocations_head;
   while (fast != NULL && fast->next != NULL) {
@@ -278,11 +283,13 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
     return engine_status;
   }
 
+  shoots_assert_invariants(engine);
   engine->state = SHOOTS_ENGINE_STATE_DESTROYED;
   engine->magic = SHOOTS_ENGINE_MAGIC_DESTROYED;
 
   engine->model_root_path = NULL;
   shoots_engine_release_all(engine);
+  memset(&engine->config, 0, sizeof(engine->config));
   engine->memory_used_bytes = 0;
   engine->memory_limit_bytes = 0;
   shoots_assert_invariants(engine);
