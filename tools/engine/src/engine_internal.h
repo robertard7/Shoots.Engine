@@ -41,8 +41,26 @@ typedef enum shoots_ledger_entry_type {
   SHOOTS_LEDGER_ENTRY_ERROR = 4
 } shoots_ledger_entry_type_t;
 
+typedef enum shoots_tool_category {
+  SHOOTS_TOOL_CATEGORY_UNSPECIFIED = 0,
+  SHOOTS_TOOL_CATEGORY_EXECUTION = 1,
+  SHOOTS_TOOL_CATEGORY_INTEGRATION = 2
+} shoots_tool_category_t;
+
+typedef enum shoots_tool_arbitration_result {
+  SHOOTS_TOOL_ARBITRATION_ACCEPT = 0,
+  SHOOTS_TOOL_ARBITRATION_REJECT = 1
+} shoots_tool_arbitration_result_t;
+
+typedef enum shoots_result_status {
+  SHOOTS_RESULT_STATUS_OK = 0,
+  SHOOTS_RESULT_STATUS_ERROR = 1
+} shoots_result_status_t;
+
 typedef struct shoots_command_record {
   uint64_t command_seq;
+  uint64_t session_id;
+  uint64_t execution_slot;
   char *command_id;
   size_t command_id_len;
   char *args;
@@ -51,6 +69,33 @@ typedef struct shoots_command_record {
   int32_t last_result_code;
   struct shoots_command_record *next;
 } shoots_command_record_t;
+
+typedef struct shoots_intent_record {
+  uint64_t created_at;
+  uint64_t session_id;
+  char *intent_id;
+  size_t intent_id_len;
+  struct shoots_intent_record *next;
+} shoots_intent_record_t;
+
+typedef struct shoots_result_record {
+  uint64_t ledger_entry_id;
+  shoots_result_status_t status;
+  char *command_id;
+  size_t command_id_len;
+  char *payload;
+  size_t payload_len;
+  struct shoots_result_record *next;
+} shoots_result_record_t;
+
+typedef struct shoots_tool_record {
+  char *tool_id;
+  size_t tool_id_len;
+  shoots_tool_category_t category;
+  uint64_t capability_mask;
+  uint64_t tool_hash;
+  struct shoots_tool_record *next;
+} shoots_tool_record_t;
 
 struct shoots_model {
   uint32_t magic;
@@ -67,6 +112,9 @@ struct shoots_session {
   shoots_session_mode_t mode;
   char *intent_id;
   char *last_error;
+  uint64_t next_execution_slot;
+  uint64_t active_execution_slot;
+  uint8_t has_active_execution;
   char *chat_buffer;
   size_t chat_capacity;
   size_t chat_size;
@@ -94,11 +142,19 @@ struct shoots_engine {
   struct shoots_session *sessions_head;
   struct shoots_session *sessions_tail;
   uint64_t next_session_id;
+  struct shoots_intent_record *intents_head;
+  struct shoots_intent_record *intents_tail;
+  uint64_t next_intent_created_at;
   struct shoots_ledger_entry *ledger_head;
   struct shoots_ledger_entry *ledger_tail;
   size_t ledger_entry_count;
   size_t ledger_total_bytes;
   uint64_t next_ledger_id;
+  struct shoots_tool_record *tools_head;
+  struct shoots_tool_record *tools_tail;
+  uint8_t tools_locked;
+  struct shoots_result_record *results_head;
+  struct shoots_result_record *results_tail;
   shoots_command_record_t *commands_head;
   shoots_command_record_t *commands_tail;
   size_t commands_entry_count;
@@ -170,11 +226,41 @@ shoots_error_code_t shoots_ledger_query_substring_internal(
 
 shoots_error_code_t shoots_command_append_internal(
   shoots_engine_t *engine,
+  shoots_session_t *session,
+  uint64_t execution_slot,
   const char *command_id,
   const char *args,
   uint8_t has_last_result,
   int32_t last_result_code,
   shoots_command_record_t **out_record,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_result_append_internal(
+  shoots_engine_t *engine,
+  shoots_session_t *session,
+  const char *command_id,
+  shoots_result_status_t status,
+  const char *payload,
+  shoots_result_record_t **out_record,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_tool_register_internal(
+  shoots_engine_t *engine,
+  const char *tool_id,
+  shoots_tool_category_t category,
+  uint64_t capability_mask,
+  shoots_tool_record_t **out_record,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_tool_arbitrate_internal(
+  shoots_engine_t *engine,
+  const char *tool_id,
+  shoots_tool_arbitration_result_t *out_result,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_tool_invoke_internal(
+  shoots_engine_t *engine,
+  const char *tool_id,
   shoots_error_info_t *out_error);
 
 shoots_error_code_t shoots_command_fetch_last_internal(
