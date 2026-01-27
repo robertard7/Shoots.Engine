@@ -126,5 +126,12 @@ shoots_error_code_t shoots_provider_runtime_validate_ready(
                      "runtime state invalid");
     return SHOOTS_ERR_INVALID_STATE;
   }
+  if (runtime->effective_allow_background_threads != 0 ||
+      runtime->effective_allow_filesystem_io != 0 ||
+      runtime->effective_allow_network_io != 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "runtime effective permissions invalid");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   return SHOOTS_OK;
 }
