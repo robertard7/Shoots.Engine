@@ -552,6 +552,64 @@ static shoots_error_code_t shoots_tool_append_decision(
   return status;
 }
 
+static shoots_error_code_t shoots_plan_append_entry(
+  shoots_engine_t *engine,
+  const char *intent_id,
+  const shoots_plan_response_t *response,
+  shoots_error_info_t *out_error) {
+  const char *safe_intent_id = intent_id != NULL ? intent_id : "(null)";
+  size_t payload_len = strlen("plan intent_id= tools=") + strlen(safe_intent_id);
+  for (size_t index = 0; index < response->tool_count; index++) {
+    const char *tool_id = response->ordered_tool_ids[index];
+    const char *reason = response->rejection_reasons[index];
+    payload_len += strlen(" ") + strlen(tool_id) + strlen(":") + strlen(reason);
+  }
+  if (payload_len > SHOOTS_LEDGER_MAX_BYTES) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger payload too large");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  char *payload = (char *)shoots_engine_alloc_internal(
+      engine, payload_len + 1, out_error);
+  if (payload == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  size_t offset = 0;
+  memcpy(payload + offset, "plan intent_id=", strlen("plan intent_id="));
+  offset += strlen("plan intent_id=");
+  memcpy(payload + offset, safe_intent_id, strlen(safe_intent_id));
+  offset += strlen(safe_intent_id);
+  memcpy(payload + offset, " tools=", strlen(" tools="));
+  offset += strlen(" tools=");
+  for (size_t index = 0; index < response->tool_count; index++) {
+    const char *tool_id = response->ordered_tool_ids[index];
+    const char *reason = response->rejection_reasons[index];
+    memcpy(payload + offset, " ", 1);
+    offset += 1;
+    memcpy(payload + offset, tool_id, strlen(tool_id));
+    offset += strlen(tool_id);
+    memcpy(payload + offset, ":", 1);
+    offset += 1;
+    memcpy(payload + offset, reason, strlen(reason));
+    offset += strlen(reason);
+  }
+  payload[offset] = '\0';
+  shoots_ledger_entry_t *entry = NULL;
+  shoots_error_code_t status = shoots_ledger_append_internal(
+      engine, SHOOTS_LEDGER_ENTRY_DECISION, payload, &entry, out_error);
+  shoots_engine_alloc_free_internal(engine, payload);
+  return status;
+}
+
+static void shoots_plan_emit_error(shoots_engine_t *engine, const char *message) {
+  if (engine == NULL || message == NULL || message[0] == '\0') {
+    return;
+  }
+  shoots_ledger_entry_t *entry = NULL;
+  shoots_ledger_append_internal(engine, SHOOTS_LEDGER_ENTRY_ERROR,
+                                message, &entry, NULL);
+}
+
 static void shoots_session_set_last_error(shoots_session_t *session, const char *message) {
   if (session == NULL || session->engine == NULL) {
     return;
@@ -2053,6 +2111,133 @@ shoots_error_code_t shoots_tool_invoke_internal(
   shoots_error_set(out_error, SHOOTS_ERR_UNSUPPORTED, SHOOTS_SEVERITY_RECOVERABLE,
                    "tool invocation not implemented");
   return SHOOTS_ERR_UNSUPPORTED;
+}
+
+shoots_error_code_t shoots_plan_internal(
+  shoots_engine_t *engine,
+  const shoots_plan_request_t *request,
+  shoots_plan_response_t *response,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (response == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "response is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  response->ordered_tool_ids = NULL;
+  response->rejection_reasons = NULL;
+  response->tool_count = 0;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (request == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "request is null");
+    shoots_plan_emit_error(engine, "plan failure: request null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (request->intent_id == NULL || request->intent_id[0] == '\0') {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "intent_id is null or empty");
+    shoots_plan_emit_error(engine, "plan failure: intent invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (!shoots_intent_exists(engine, request->intent_id)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "intent record missing");
+    shoots_plan_emit_error(engine, "plan failure: intent missing");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (request->requested_tool_count > 0 && request->requested_tools == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "requested_tools is null");
+    shoots_plan_emit_error(engine, "plan failure: tools null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  size_t tool_count = request->requested_tool_count;
+  if (tool_count > SIZE_MAX / sizeof(char *)) {
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "plan size overflow");
+    shoots_plan_emit_error(engine, "plan failure: size overflow");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  char **tool_ids = NULL;
+  char **reasons = NULL;
+  if (tool_count > 0) {
+    tool_ids = (char **)shoots_engine_alloc_internal(
+        engine, tool_count * sizeof(*tool_ids), out_error);
+    if (tool_ids == NULL) {
+      return SHOOTS_ERR_OUT_OF_MEMORY;
+    }
+    reasons = (char **)shoots_engine_alloc_internal(
+        engine, tool_count * sizeof(*reasons), out_error);
+    if (reasons == NULL) {
+      shoots_engine_alloc_free_internal(engine, tool_ids);
+      return SHOOTS_ERR_OUT_OF_MEMORY;
+    }
+    for (size_t index = 0; index < tool_count; index++) {
+      tool_ids[index] = NULL;
+      reasons[index] = NULL;
+    }
+  }
+
+  for (size_t index = 0; index < tool_count; index++) {
+    const char *requested = request->requested_tools[index];
+    if (requested == NULL || requested[0] == '\0') {
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                       "tool_id is null or empty");
+      shoots_plan_emit_error(engine, "plan failure: tool_id invalid");
+      for (size_t cleanup = 0; cleanup < tool_count; cleanup++) {
+        shoots_engine_alloc_free_internal(engine, tool_ids[cleanup]);
+        shoots_engine_alloc_free_internal(engine, reasons[cleanup]);
+      }
+      shoots_engine_alloc_free_internal(engine, tool_ids);
+      shoots_engine_alloc_free_internal(engine, reasons);
+      return SHOOTS_ERR_INVALID_ARGUMENT;
+    }
+    size_t tool_len = strlen(requested);
+    char *tool_copy = (char *)shoots_engine_alloc_internal(
+        engine, tool_len + 1, out_error);
+    if (tool_copy == NULL) {
+      for (size_t cleanup = 0; cleanup < tool_count; cleanup++) {
+        shoots_engine_alloc_free_internal(engine, tool_ids[cleanup]);
+        shoots_engine_alloc_free_internal(engine, reasons[cleanup]);
+      }
+      shoots_engine_alloc_free_internal(engine, tool_ids);
+      shoots_engine_alloc_free_internal(engine, reasons);
+      return SHOOTS_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(tool_copy, requested, tool_len + 1);
+    tool_ids[index] = tool_copy;
+    const char *reason = shoots_tool_find(engine, requested) != NULL ? "ok" : "tool not found";
+    size_t reason_len = strlen(reason);
+    char *reason_copy = (char *)shoots_engine_alloc_internal(
+        engine, reason_len + 1, out_error);
+    if (reason_copy == NULL) {
+      for (size_t cleanup = 0; cleanup < tool_count; cleanup++) {
+        shoots_engine_alloc_free_internal(engine, tool_ids[cleanup]);
+        shoots_engine_alloc_free_internal(engine, reasons[cleanup]);
+      }
+      shoots_engine_alloc_free_internal(engine, tool_ids);
+      shoots_engine_alloc_free_internal(engine, reasons);
+      return SHOOTS_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(reason_copy, reason, reason_len + 1);
+    reasons[index] = reason_copy;
+  }
+
+  response->ordered_tool_ids = tool_ids;
+  response->rejection_reasons = reasons;
+  response->tool_count = tool_count;
+
+  shoots_error_code_t ledger_status = shoots_plan_append_entry(
+      engine, request->intent_id, response, out_error);
+  if (ledger_status != SHOOTS_OK) {
+    return ledger_status;
+  }
+  shoots_assert_invariants(engine);
+  return SHOOTS_OK;
 }
 
 shoots_error_code_t shoots_command_fetch_last_internal(

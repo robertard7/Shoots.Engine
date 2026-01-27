@@ -52,6 +52,19 @@ typedef enum shoots_tool_arbitration_result {
   SHOOTS_TOOL_ARBITRATION_REJECT = 1
 } shoots_tool_arbitration_result_t;
 
+typedef struct shoots_plan_request {
+  const char *intent_id;
+  const char **requested_tools;
+  size_t requested_tool_count;
+  const char *constraints;
+} shoots_plan_request_t;
+
+typedef struct shoots_plan_response {
+  char **ordered_tool_ids;
+  char **rejection_reasons;
+  size_t tool_count;
+} shoots_plan_response_t;
+
 typedef enum shoots_result_status {
   SHOOTS_RESULT_STATUS_OK = 0,
   SHOOTS_RESULT_STATUS_ERROR = 1
@@ -261,6 +274,12 @@ shoots_error_code_t shoots_tool_arbitrate_internal(
 shoots_error_code_t shoots_tool_invoke_internal(
   shoots_engine_t *engine,
   const char *tool_id,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_plan_internal(
+  shoots_engine_t *engine,
+  const shoots_plan_request_t *request,
+  shoots_plan_response_t *response,
   shoots_error_info_t *out_error);
 
 shoots_error_code_t shoots_command_fetch_last_internal(
