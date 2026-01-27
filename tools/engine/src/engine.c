@@ -93,6 +93,9 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
       assert(cursor->chat_capacity == SHOOTS_SESSION_CHAT_CAPACITY);
       assert(cursor->chat_head < cursor->chat_capacity || cursor->chat_capacity == 0);
       assert(cursor->chat_size <= cursor->chat_capacity);
+      if (cursor->state == SHOOTS_SESSION_STATE_ACTIVE) {
+        assert(cursor->next_execution_slot != 0);
+      }
       cursor = cursor->next;
     }
   }
@@ -106,6 +109,13 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     assert(engine->ledger_tail->next == NULL);
     assert(engine->ledger_entry_count <= SHOOTS_LEDGER_MAX_ENTRIES);
     assert(engine->ledger_total_bytes <= SHOOTS_LEDGER_MAX_BYTES);
+    shoots_ledger_entry_t *ledger_cursor = engine->ledger_head;
+    uint64_t last_entry_id = 0;
+    while (ledger_cursor != NULL) {
+      assert(ledger_cursor->entry_id > last_entry_id);
+      last_entry_id = ledger_cursor->entry_id;
+      ledger_cursor = ledger_cursor->next;
+    }
   }
   if (engine->commands_entry_count == 0) {
     assert(engine->commands_head == NULL);
@@ -123,6 +133,15 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
   } else {
     assert(engine->intents_tail != NULL);
     assert(engine->intents_tail->next == NULL);
+    shoots_intent_record_t *intent_cursor = engine->intents_head;
+    while (intent_cursor != NULL) {
+      shoots_intent_record_t *check = intent_cursor->next;
+      while (check != NULL) {
+        assert(strcmp(intent_cursor->intent_id, check->intent_id) != 0);
+        check = check->next;
+      }
+      intent_cursor = intent_cursor->next;
+    }
   }
   if (engine->results_head == NULL) {
     assert(engine->results_tail == NULL);
@@ -166,7 +185,28 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
       ledger_cursor = ledger_cursor->next;
     }
     assert(found);
+    shoots_result_record_t *check = result_cursor->next;
+    while (check != NULL) {
+      assert(check->ledger_entry_id != result_cursor->ledger_entry_id);
+      check = check->next;
+    }
     result_cursor = result_cursor->next;
+  }
+  shoots_ledger_entry_t *ledger_cursor = engine->ledger_head;
+  while (ledger_cursor != NULL) {
+    if (ledger_cursor->type == SHOOTS_LEDGER_ENTRY_RESULT) {
+      shoots_result_record_t *result_check = engine->results_head;
+      int found = 0;
+      while (result_check != NULL) {
+        if (result_check->ledger_entry_id == ledger_cursor->entry_id) {
+          found = 1;
+          break;
+        }
+        result_check = result_check->next;
+      }
+      assert(found);
+    }
+    ledger_cursor = ledger_cursor->next;
   }
 #endif
 }
@@ -1539,6 +1579,11 @@ shoots_error_code_t shoots_result_append_internal(
   shoots_error_code_t session_status = shoots_validate_session(engine, session, out_error);
   if (session_status != SHOOTS_OK) {
     return session_status;
+  }
+  if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session not active");
+    return SHOOTS_ERR_INVALID_STATE;
   }
   if (command_id == NULL || command_id[0] == '\0') {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
