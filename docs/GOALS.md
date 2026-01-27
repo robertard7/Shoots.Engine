@@ -18,3 +18,7 @@ If it is not listed above, it is out of scope.
 
 ## Phase 6 Lock — ABI & Integration Prep
 - ABI surface snapshot, FFI audit, and static/shared parity are locked for this phase.
+
+## Phase 7 Lock — Host & Integration Contracts
+- Host responsibility contract, capability declaration, and integration examples are locked.
+- No further Phase 7 contract changes without a phase bump.
