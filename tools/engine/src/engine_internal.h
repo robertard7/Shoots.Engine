@@ -282,6 +282,11 @@ shoots_error_code_t shoots_plan_internal(
   shoots_plan_response_t *response,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_plan_response_free_internal(
+  shoots_engine_t *engine,
+  shoots_plan_response_t *response,
+  shoots_error_info_t *out_error);
+
 shoots_error_code_t shoots_engine_can_execute_internal(
   shoots_engine_t *engine,
   shoots_session_t *session,

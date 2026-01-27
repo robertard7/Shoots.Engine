@@ -2256,6 +2256,45 @@ shoots_error_code_t shoots_plan_internal(
   return SHOOTS_OK;
 }
 
+shoots_error_code_t shoots_plan_response_free_internal(
+  shoots_engine_t *engine,
+  shoots_plan_response_t *response,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (response == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "response is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (response->tool_count == 0) {
+    response->ordered_tool_ids = NULL;
+    response->rejection_reasons = NULL;
+    response->tool_count = 0;
+    return SHOOTS_OK;
+  }
+  if (response->ordered_tool_ids == NULL || response->rejection_reasons == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "plan response already freed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  for (size_t index = 0; index < response->tool_count; index++) {
+    shoots_engine_alloc_free_internal(engine, response->ordered_tool_ids[index]);
+    response->ordered_tool_ids[index] = NULL;
+    shoots_engine_alloc_free_internal(engine, response->rejection_reasons[index]);
+    response->rejection_reasons[index] = NULL;
+  }
+  shoots_engine_alloc_free_internal(engine, response->ordered_tool_ids);
+  shoots_engine_alloc_free_internal(engine, response->rejection_reasons);
+  response->ordered_tool_ids = NULL;
+  response->rejection_reasons = NULL;
+  response->tool_count = 0;
+  return SHOOTS_OK;
+}
+
 shoots_error_code_t shoots_engine_can_execute_internal(
   shoots_engine_t *engine,
   shoots_session_t *session,
