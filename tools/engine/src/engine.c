@@ -1,4 +1,5 @@
 #include "engine_internal.h"
+#include "provider_runtime.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -224,9 +225,9 @@ static void shoots_release_memory(shoots_engine_t *engine, size_t bytes) {
   engine->memory_used_bytes -= bytes;
 }
 
-static void *shoots_engine_alloc(shoots_engine_t *engine,
-                                 size_t bytes,
-                                 shoots_error_info_t *out_error) {
+void *shoots_engine_alloc_internal(shoots_engine_t *engine,
+                                   size_t bytes,
+                                   shoots_error_info_t *out_error) {
 #ifndef NDEBUG
   size_t prior_memory_used = 0;
   void *prior_allocations_head = NULL;
@@ -279,7 +280,7 @@ static void *shoots_engine_alloc(shoots_engine_t *engine,
   return (void *)(header + 1);
 }
 
-static void shoots_engine_alloc_free(shoots_engine_t *engine, void *buffer) {
+void shoots_engine_alloc_free_internal(shoots_engine_t *engine, void *buffer) {
   if (buffer == NULL) {
     return;
   }
@@ -354,6 +355,7 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->state = SHOOTS_ENGINE_STATE_INITIALIZED;
   engine->magic = SHOOTS_ENGINE_MAGIC;
   engine->allocations_head = NULL;
+  engine->provider_runtime = NULL;
   engine->models_head = NULL;
   engine->models_tail = NULL;
 
@@ -361,7 +363,8 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->model_root_path = NULL;
 
   size_t path_len = strlen(config->model_root_path);
-  char *path_copy = (char *)shoots_engine_alloc(engine, path_len + 1, out_error);
+  char *path_copy = (char *)shoots_engine_alloc_internal(
+      engine, path_len + 1, out_error);
   if (path_copy == NULL) {
     shoots_engine_destroy(engine, NULL);
     return SHOOTS_ERR_OUT_OF_MEMORY;
@@ -369,6 +372,13 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   memcpy(path_copy, config->model_root_path, path_len + 1);
   engine->model_root_path = path_copy;
   engine->config.model_root_path = engine->model_root_path;
+
+  shoots_error_code_t runtime_status = shoots_provider_runtime_create(
+      engine, &engine->config, &engine->provider_runtime, out_error);
+  if (runtime_status != SHOOTS_OK) {
+    shoots_engine_destroy(engine, NULL);
+    return runtime_status;
+  }
 
   *out_engine = engine;
   shoots_assert_invariants(engine);
@@ -386,6 +396,16 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "models still loaded");
     return SHOOTS_ERR_INVALID_STATE;
+  }
+
+  if (engine->provider_runtime != NULL) {
+    shoots_error_code_t runtime_status = shoots_provider_runtime_destroy(
+        engine, engine->provider_runtime, out_error);
+    if (runtime_status != SHOOTS_OK) {
+      return runtime_status;
+    }
+    shoots_engine_alloc_free_internal(engine, engine->provider_runtime);
+    engine->provider_runtime = NULL;
   }
 
   shoots_assert_invariants(engine);
@@ -434,7 +454,7 @@ shoots_error_code_t shoots_engine_free(shoots_engine_t *engine,
                      "buffer not owned by engine");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
-  shoots_engine_alloc_free(engine, buffer);
+  shoots_engine_alloc_free_internal(engine, buffer);
   return SHOOTS_OK;
 }
 
@@ -459,7 +479,7 @@ shoots_error_code_t shoots_model_load(shoots_engine_t *engine,
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
 
-  shoots_model_t *model = (shoots_model_t *)shoots_engine_alloc(
+  shoots_model_t *model = (shoots_model_t *)shoots_engine_alloc_internal(
       engine, sizeof(*model), out_error);
   if (model == NULL) {
     return SHOOTS_ERR_OUT_OF_MEMORY;
@@ -494,7 +514,85 @@ shoots_error_code_t shoots_model_unload(shoots_engine_t *engine,
   }
   model->state = SHOOTS_MODEL_STATE_DESTROYED;
   model->magic = SHOOTS_MODEL_MAGIC_DESTROYED;
-  shoots_engine_alloc_free(engine, model);
+  shoots_engine_alloc_free_internal(engine, model);
   shoots_assert_invariants(engine);
   return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_infer(shoots_engine_t *engine,
+                                 const shoots_inference_request_t *request,
+                                 shoots_inference_response_t *response,
+                                 shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (request == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "request is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (response == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "response is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (request->input_tokens == NULL && request->input_token_count > 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "input_tokens is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t runtime_status = shoots_provider_runtime_validate_ready(
+      engine->provider_runtime, out_error);
+  if (runtime_status != SHOOTS_OK) {
+    return runtime_status;
+  }
+  shoots_error_code_t model_status =
+      shoots_validate_model(engine, request->model, out_error);
+  if (model_status != SHOOTS_OK) {
+    return model_status;
+  }
+  shoots_error_set(out_error, SHOOTS_ERR_UNSUPPORTED, SHOOTS_SEVERITY_RECOVERABLE,
+                   "NOT_IMPLEMENTED");
+  return SHOOTS_ERR_UNSUPPORTED;
+}
+
+shoots_error_code_t shoots_embed(shoots_engine_t *engine,
+                                 const shoots_embedding_request_t *request,
+                                 shoots_embedding_response_t *response,
+                                 shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  if (request == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "request is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (response == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "response is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (request->input_tokens == NULL && request->input_token_count > 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "input_tokens is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t runtime_status = shoots_provider_runtime_validate_ready(
+      engine->provider_runtime, out_error);
+  if (runtime_status != SHOOTS_OK) {
+    return runtime_status;
+  }
+  shoots_error_code_t model_status =
+      shoots_validate_model(engine, request->model, out_error);
+  if (model_status != SHOOTS_OK) {
+    return model_status;
+  }
+  shoots_error_set(out_error, SHOOTS_ERR_UNSUPPORTED, SHOOTS_SEVERITY_RECOVERABLE,
+                   "NOT_IMPLEMENTED");
+  return SHOOTS_ERR_UNSUPPORTED;
 }

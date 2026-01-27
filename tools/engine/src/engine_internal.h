@@ -6,6 +6,8 @@
 
 #include "shoots/shoots.h"
 
+typedef struct shoots_provider_runtime shoots_provider_runtime_t;
+
 typedef enum shoots_engine_state {
   SHOOTS_ENGINE_STATE_UNINITIALIZED = 0,
   SHOOTS_ENGINE_STATE_INITIALIZED = 1,
@@ -31,10 +33,17 @@ struct shoots_engine {
   size_t memory_used_bytes;
   size_t memory_limit_bytes;
   void *allocations_head;
+  shoots_provider_runtime_t *provider_runtime;
   struct shoots_model *models_head;
   struct shoots_model *models_tail;
   shoots_engine_state_t state;
   uint32_t magic;
 };
+
+void *shoots_engine_alloc_internal(shoots_engine_t *engine,
+                                   size_t bytes,
+                                   shoots_error_info_t *out_error);
+
+void shoots_engine_alloc_free_internal(shoots_engine_t *engine, void *buffer);
 
 #endif
