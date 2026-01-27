@@ -11,6 +11,7 @@ This repository is intentionally minimal.
 - Preserve deterministic, embeddable constraints.
 - Treat lifecycle semantics as locked for ABI stability.
 - Treat model handle load/unload and engine destroy semantics as locked for this phase.
+- Treat ABI snapshot, FFI audit, and static/shared parity documentation as locked for Phase 6.
 
 Everything else comes later.
 

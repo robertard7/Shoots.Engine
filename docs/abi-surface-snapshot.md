@@ -146,3 +146,9 @@ shoots_error_code_t shoots_embed(
   with `usize` in Rust or `usize` in Zig for FFI bindings.
 - C enum underlying size is implementation-defined; bindings should mirror the C ABI
   (`repr(C)` in Rust or explicit enum backing type in Zig) rather than assuming `int32_t`.
+
+## Static vs Shared Parity (Phase 6.3)
+
+- Both static and shared targets are built from the same `tools/engine/src` sources.
+- No conditional compilation toggles or symbol differences are defined between the targets.
+- Exported API functions are identical across static and shared builds.

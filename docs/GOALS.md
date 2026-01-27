@@ -15,3 +15,6 @@
 - Host adapters or Shoots integration.
 
 If it is not listed above, it is out of scope.
+
+## Phase 6 Lock — ABI & Integration Prep
+- ABI surface snapshot, FFI audit, and static/shared parity are locked for this phase.
