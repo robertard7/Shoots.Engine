@@ -718,6 +718,42 @@ static shoots_error_code_t shoots_tool_append_decision(
   return status;
 }
 
+static const char *shoots_tool_reject_code_text(shoots_tool_reject_code_t code) {
+  switch (code) {
+    case SHOOTS_TOOL_REJECT_OK:
+      return "OK";
+    case SHOOTS_TOOL_REJECT_TOOL_NOT_FOUND:
+      return "TOOL_NOT_FOUND";
+    case SHOOTS_TOOL_REJECT_CONSTRAINT_MISMATCH:
+      return "CONSTRAINT_MISMATCH";
+    case SHOOTS_TOOL_REJECT_CAPABILITY_MISMATCH:
+      return "CAPABILITY_MISMATCH";
+    case SHOOTS_TOOL_REJECT_INVALID_DESCRIPTOR:
+      return "INVALID_DESCRIPTOR";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static void shoots_tool_reject_reason_set(shoots_tool_reject_reason_t *reason,
+                                          shoots_tool_reject_code_t code,
+                                          const char *token) {
+  if (reason == NULL) {
+    return;
+  }
+  reason->code = code;
+  reason->token[0] = '\0';
+  if (token == NULL || token[0] == '\0') {
+    return;
+  }
+  size_t token_len = strlen(token);
+  if (token_len >= sizeof(reason->token)) {
+    token_len = sizeof(reason->token) - 1;
+  }
+  memcpy(reason->token, token, token_len);
+  reason->token[token_len] = '\0';
+}
+
 static shoots_error_code_t shoots_plan_append_entry(
   shoots_engine_t *engine,
   const char *intent_id,
@@ -727,8 +763,12 @@ static shoots_error_code_t shoots_plan_append_entry(
   size_t payload_len = strlen("plan intent_id= tools=") + strlen(safe_intent_id);
   for (size_t index = 0; index < response->tool_count; index++) {
     const char *tool_id = response->ordered_tool_ids[index];
-    const char *reason = response->rejection_reasons[index];
-    payload_len += strlen(" ") + strlen(tool_id) + strlen(":") + strlen(reason);
+    const shoots_tool_reject_reason_t *reason = &response->rejection_reasons[index];
+    const char *code_text = shoots_tool_reject_code_text(reason->code);
+    size_t token_len = strnlen(reason->token, sizeof(reason->token));
+    payload_len += strlen(" ") + strlen(tool_id) +
+                   strlen(":code=") + strlen(code_text) +
+                   strlen(" token=") + token_len;
   }
   if (payload_len > SHOOTS_LEDGER_MAX_BYTES) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
@@ -749,15 +789,21 @@ static shoots_error_code_t shoots_plan_append_entry(
   offset += strlen(" tools=");
   for (size_t index = 0; index < response->tool_count; index++) {
     const char *tool_id = response->ordered_tool_ids[index];
-    const char *reason = response->rejection_reasons[index];
+    const shoots_tool_reject_reason_t *reason = &response->rejection_reasons[index];
+    const char *code_text = shoots_tool_reject_code_text(reason->code);
+    size_t token_len = strnlen(reason->token, sizeof(reason->token));
     memcpy(payload + offset, " ", 1);
     offset += 1;
     memcpy(payload + offset, tool_id, strlen(tool_id));
     offset += strlen(tool_id);
-    memcpy(payload + offset, ":", 1);
-    offset += 1;
-    memcpy(payload + offset, reason, strlen(reason));
-    offset += strlen(reason);
+    memcpy(payload + offset, ":code=", strlen(":code="));
+    offset += strlen(":code=");
+    memcpy(payload + offset, code_text, strlen(code_text));
+    offset += strlen(code_text);
+    memcpy(payload + offset, " token=", strlen(" token="));
+    offset += strlen(" token=");
+    memcpy(payload + offset, reason->token, token_len);
+    offset += token_len;
   }
   payload[offset] = '\0';
   shoots_ledger_entry_t *entry = NULL;
@@ -2468,14 +2514,14 @@ shoots_error_code_t shoots_plan_internal(
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   char **tool_ids = NULL;
-  char **reasons = NULL;
+  shoots_tool_reject_reason_t *reasons = NULL;
   if (tool_count > 0) {
     tool_ids = (char **)shoots_engine_alloc_internal(
         engine, tool_count * sizeof(*tool_ids), out_error);
     if (tool_ids == NULL) {
       return SHOOTS_ERR_OUT_OF_MEMORY;
     }
-    reasons = (char **)shoots_engine_alloc_internal(
+    reasons = (shoots_tool_reject_reason_t *)shoots_engine_alloc_internal(
         engine, tool_count * sizeof(*reasons), out_error);
     if (reasons == NULL) {
       shoots_engine_alloc_free_internal(engine, tool_ids);
@@ -2483,7 +2529,7 @@ shoots_error_code_t shoots_plan_internal(
     }
     for (size_t index = 0; index < tool_count; index++) {
       tool_ids[index] = NULL;
-      reasons[index] = NULL;
+      shoots_tool_reject_reason_set(&reasons[index], SHOOTS_TOOL_REJECT_OK, "");
     }
   }
 
@@ -2495,7 +2541,6 @@ shoots_error_code_t shoots_plan_internal(
       shoots_plan_emit_error(engine, "plan failure: tool_id invalid");
       for (size_t cleanup = 0; cleanup < tool_count; cleanup++) {
         shoots_engine_alloc_free_internal(engine, tool_ids[cleanup]);
-        shoots_engine_alloc_free_internal(engine, reasons[cleanup]);
       }
       shoots_engine_alloc_free_internal(engine, tool_ids);
       shoots_engine_alloc_free_internal(engine, reasons);
@@ -2507,7 +2552,6 @@ shoots_error_code_t shoots_plan_internal(
     if (tool_copy == NULL) {
       for (size_t cleanup = 0; cleanup < tool_count; cleanup++) {
         shoots_engine_alloc_free_internal(engine, tool_ids[cleanup]);
-        shoots_engine_alloc_free_internal(engine, reasons[cleanup]);
       }
       shoots_engine_alloc_free_internal(engine, tool_ids);
       shoots_engine_alloc_free_internal(engine, reasons);
@@ -2515,21 +2559,12 @@ shoots_error_code_t shoots_plan_internal(
     }
     memcpy(tool_copy, requested, tool_len + 1);
     tool_ids[index] = tool_copy;
-    const char *reason = shoots_tool_find(engine, requested) != NULL ? "ok" : "tool not found";
-    size_t reason_len = strlen(reason);
-    char *reason_copy = (char *)shoots_engine_alloc_internal(
-        engine, reason_len + 1, out_error);
-    if (reason_copy == NULL) {
-      for (size_t cleanup = 0; cleanup < tool_count; cleanup++) {
-        shoots_engine_alloc_free_internal(engine, tool_ids[cleanup]);
-        shoots_engine_alloc_free_internal(engine, reasons[cleanup]);
-      }
-      shoots_engine_alloc_free_internal(engine, tool_ids);
-      shoots_engine_alloc_free_internal(engine, reasons);
-      return SHOOTS_ERR_OUT_OF_MEMORY;
+    if (shoots_tool_find(engine, requested) != NULL) {
+      shoots_tool_reject_reason_set(&reasons[index], SHOOTS_TOOL_REJECT_OK, "ok");
+    } else {
+      shoots_tool_reject_reason_set(&reasons[index], SHOOTS_TOOL_REJECT_TOOL_NOT_FOUND,
+                                    "tool_not_found");
     }
-    memcpy(reason_copy, reason, reason_len + 1);
-    reasons[index] = reason_copy;
   }
 
   response->ordered_tool_ids = tool_ids;
@@ -2578,8 +2613,6 @@ shoots_error_code_t shoots_plan_response_free_internal(
   for (size_t index = 0; index < response->tool_count; index++) {
     shoots_engine_alloc_free_internal(engine, response->ordered_tool_ids[index]);
     response->ordered_tool_ids[index] = NULL;
-    shoots_engine_alloc_free_internal(engine, response->rejection_reasons[index]);
-    response->rejection_reasons[index] = NULL;
   }
   shoots_engine_alloc_free_internal(engine, response->ordered_tool_ids);
   shoots_engine_alloc_free_internal(engine, response->rejection_reasons);

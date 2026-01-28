@@ -86,6 +86,21 @@ typedef struct shoots_tool_constraints {
   shoots_tool_confirm_policy_t confirm_policy;
 } shoots_tool_constraints_t;
 
+typedef enum shoots_tool_reject_code {
+  SHOOTS_TOOL_REJECT_OK = 0,
+  SHOOTS_TOOL_REJECT_TOOL_NOT_FOUND = 1,
+  SHOOTS_TOOL_REJECT_CONSTRAINT_MISMATCH = 2,
+  SHOOTS_TOOL_REJECT_CAPABILITY_MISMATCH = 3,
+  SHOOTS_TOOL_REJECT_INVALID_DESCRIPTOR = 4
+} shoots_tool_reject_code_t;
+
+#define SHOOTS_TOOL_REASON_TOKEN_MAX 24u
+
+typedef struct shoots_tool_reject_reason {
+  shoots_tool_reject_code_t code;
+  char token[SHOOTS_TOOL_REASON_TOKEN_MAX];
+} shoots_tool_reject_reason_t;
+
 #define SHOOTS_TOOL_ID_MIN_LEN 1u
 #define SHOOTS_TOOL_ID_MAX_LEN 64u
 #define SHOOTS_TOOL_VERSION_MIN 1u
@@ -110,7 +125,7 @@ typedef struct shoots_plan_request {
 
 typedef struct shoots_plan_response {
   char   **ordered_tool_ids;
-  char   **rejection_reasons;
+  shoots_tool_reject_reason_t *rejection_reasons;
   size_t   tool_count;
 } shoots_plan_response_t;
 
