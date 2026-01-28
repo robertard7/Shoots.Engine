@@ -1,5 +1,31 @@
 #include "tools.h"
 #include <string.h>
+#ifndef NDEBUG
+#include <assert.h>
+#endif
+
+#ifndef NDEBUG
+static void tools_assert_descriptor_bounds(
+  const char *tool_id,
+  uint32_t version,
+  uint64_t capabilities,
+  const shoots_tool_constraints_t *constraints,
+  uint32_t determinism_flags) {
+  size_t tool_id_len = tool_id != NULL ? strlen(tool_id) : 0;
+  assert(tool_id_len >= SHOOTS_TOOL_ID_MIN_LEN);
+  assert(tool_id_len <= SHOOTS_TOOL_ID_MAX_LEN);
+  assert(version >= SHOOTS_TOOL_VERSION_MIN);
+  assert(version <= SHOOTS_TOOL_VERSION_MAX);
+  assert((determinism_flags & ~SHOOTS_TOOL_DETERMINISM_MASK) == 0u);
+  assert((capabilities & ~SHOOTS_TOOL_CAPABILITIES_ALLOWED) == 0u);
+  if (constraints != NULL) {
+    assert(constraints->max_args <= SHOOTS_TOOL_MAX_ARGS);
+    assert(constraints->max_bytes <= SHOOTS_TOOL_MAX_BYTES);
+    assert(constraints->confirm_policy >= SHOOTS_TOOL_CONFIRM_NONE);
+    assert(constraints->confirm_policy <= SHOOTS_TOOL_CONFIRM_ON_FAIL);
+  }
+}
+#endif
 
 static void tools_set_error(shoots_error_info_t *out_error,
                             shoots_error_code_t code,
@@ -107,6 +133,9 @@ shoots_error_code_t tools_register(
     }
     return status;
   }
+#ifndef NDEBUG
+  tools_assert_descriptor_bounds(tool_id, version, capabilities, constraints, determinism_flags);
+#endif
   return shoots_tool_register_internal(engine, tool_id, category, version,
                                        capabilities, constraints,
                                        determinism_flags, out_record, out_error);
