@@ -29,6 +29,8 @@ typedef struct shoots_alloc_header {
   struct shoots_alloc_header *next;
 } shoots_alloc_header_t;
 
+static shoots_session_t *shoots_find_session(shoots_engine_t *engine, uint64_t session_id);
+
 static void shoots_error_clear(shoots_error_info_t *out_error) {
   if (out_error == NULL) {
     return;
@@ -48,6 +50,22 @@ static void shoots_error_set(shoots_error_info_t *out_error,
   out_error->code = code;
   out_error->severity = severity;
   out_error->message = message;
+}
+
+static shoots_error_code_t shoots_invariant_violation(shoots_engine_t *engine,
+                                                      const char *message,
+                                                      shoots_error_info_t *out_error) {
+#ifndef NDEBUG
+  assert(0 && message);
+#endif
+  shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_FATAL,
+                   message);
+  if (engine != NULL && message != NULL && message[0] != '\0') {
+    shoots_ledger_entry_t *entry = NULL;
+    shoots_ledger_append_internal(engine, SHOOTS_LEDGER_ENTRY_ERROR,
+                                  message, &entry, NULL);
+  }
+  return SHOOTS_ERR_INVALID_STATE;
 }
 
 static void shoots_assert_invariants(const shoots_engine_t *engine) {
@@ -99,6 +117,13 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
         if (cursor->has_active_execution) {
           assert(cursor->active_execution_slot != 0);
           assert(cursor->active_execution_slot < cursor->next_execution_slot);
+          if (cursor->has_terminal_execution) {
+            assert(cursor->active_execution_slot > cursor->terminal_execution_slot);
+          }
+        }
+        if (cursor->has_terminal_execution) {
+          assert(cursor->terminal_execution_slot != 0);
+          assert(cursor->terminal_execution_slot < cursor->next_execution_slot);
         }
       }
       cursor = cursor->next;
@@ -187,11 +212,31 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     if (last_slot != 0) {
       assert(command_cursor->execution_slot > last_slot);
     }
+    shoots_result_record_t *result_check = engine->results_head;
+    int result_found = 0;
+    while (result_check != NULL) {
+      if (result_check->session_id == command_cursor->session_id &&
+          result_check->execution_slot == command_cursor->execution_slot) {
+        result_found = 1;
+        break;
+      }
+      result_check = result_check->next;
+    }
+    shoots_session_t *session_check =
+        shoots_find_session(engine, command_cursor->session_id);
+    if (session_check != NULL && session_check->has_active_execution &&
+        session_check->active_execution_slot == command_cursor->execution_slot) {
+      assert(!result_found);
+    } else {
+      assert(result_found);
+    }
     command_cursor = command_cursor->next;
   }
   shoots_result_record_t *result_cursor = engine->results_head;
   while (result_cursor != NULL) {
     assert(result_cursor->ledger_entry_id != 0);
+    assert(result_cursor->session_id != 0);
+    assert(result_cursor->execution_slot != 0);
     shoots_ledger_entry_t *ledger_cursor = engine->ledger_head;
     int found = 0;
     while (ledger_cursor != NULL) {
@@ -203,9 +248,24 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
       ledger_cursor = ledger_cursor->next;
     }
     assert(found);
+    shoots_command_record_t *command_cursor = engine->commands_head;
+    int command_found = 0;
+    while (command_cursor != NULL) {
+      if (command_cursor->session_id == result_cursor->session_id &&
+          command_cursor->execution_slot == result_cursor->execution_slot &&
+          strcmp(command_cursor->command_id, result_cursor->command_id) == 0) {
+        command_found = 1;
+        break;
+      }
+      command_cursor = command_cursor->next;
+    }
+    assert(command_found);
     shoots_result_record_t *check = result_cursor->next;
     while (check != NULL) {
       assert(check->ledger_entry_id != result_cursor->ledger_entry_id);
+      if (check->session_id == result_cursor->session_id) {
+        assert(check->execution_slot != result_cursor->execution_slot);
+      }
       check = check->next;
     }
     result_cursor = result_cursor->next;
@@ -388,7 +448,68 @@ static void shoots_register_result(shoots_engine_t *engine, shoots_result_record
   engine->results_tail = record;
 }
 
+static shoots_intent_record_t *shoots_find_intent_record(shoots_engine_t *engine,
+                                                         const char *intent_id) {
+  if (engine == NULL || intent_id == NULL) {
+    return NULL;
+  }
+  shoots_intent_record_t *cursor = engine->intents_head;
+  while (cursor != NULL) {
+    if (strcmp(cursor->intent_id, intent_id) == 0) {
+      return cursor;
+    }
+    cursor = cursor->next;
+  }
+  return NULL;
+}
+
 static int shoots_intent_exists(shoots_engine_t *engine, const char *intent_id) {
+  return shoots_find_intent_record(engine, intent_id) != NULL;
+}
+
+static shoots_command_record_t *shoots_find_command_for_slot(shoots_engine_t *engine,
+                                                             uint64_t session_id,
+                                                             uint64_t execution_slot) {
+  shoots_command_record_t *cursor = engine->commands_head;
+  while (cursor != NULL) {
+    if (cursor->session_id == session_id &&
+        cursor->execution_slot == execution_slot) {
+      return cursor;
+    }
+    cursor = cursor->next;
+  }
+  return NULL;
+}
+
+static shoots_result_record_t *shoots_find_result_for_slot(shoots_engine_t *engine,
+                                                           uint64_t session_id,
+                                                           uint64_t execution_slot) {
+  shoots_result_record_t *cursor = engine->results_head;
+  while (cursor != NULL) {
+    if (cursor->session_id == session_id &&
+        cursor->execution_slot == execution_slot) {
+      return cursor;
+    }
+    cursor = cursor->next;
+  }
+  return NULL;
+}
+
+static shoots_result_record_t *shoots_find_result_for_command(shoots_engine_t *engine,
+                                                              const char *command_id) {
+  if (engine == NULL || command_id == NULL) {
+    return NULL;
+  }
+  shoots_result_record_t *cursor = engine->results_head;
+  while (cursor != NULL) {
+    if (cursor->command_id != NULL &&
+        strcmp(cursor->command_id, command_id) == 0) {
+      return cursor;
+    }
+    cursor = cursor->next;
+  }
+  return NULL;
+}
   shoots_intent_record_t *cursor = engine->intents_head;
   while (cursor != NULL) {
     if (strcmp(cursor->intent_id, intent_id) == 0) {
@@ -626,6 +747,15 @@ static void shoots_engine_emit_execution_denial(shoots_engine_t *engine,
                                 buffer, &entry, NULL);
 }
 
+static void shoots_emit_execution_misuse(shoots_engine_t *engine, const char *message) {
+  if (engine == NULL || message == NULL || message[0] == '\0') {
+    return;
+  }
+  shoots_ledger_entry_t *entry = NULL;
+  shoots_ledger_append_internal(engine, SHOOTS_LEDGER_ENTRY_ERROR,
+                                message, &entry, NULL);
+}
+
 static void shoots_session_set_last_error(shoots_session_t *session, const char *message) {
   if (session == NULL || session->engine == NULL) {
     return;
@@ -708,6 +838,45 @@ static void shoots_evict_ledger_head(shoots_engine_t *engine) {
   engine->ledger_head = entry->next;
   if (engine->ledger_head == NULL) {
     engine->ledger_tail = NULL;
+  }
+  shoots_evict_result_by_ledger_id(engine, entry->entry_id);
+  if (engine->ledger_entry_count > 0) {
+    engine->ledger_entry_count--;
+  }
+  if (entry->payload_len <= engine->ledger_total_bytes) {
+    engine->ledger_total_bytes -= entry->payload_len;
+  } else {
+    engine->ledger_total_bytes = 0;
+  }
+  shoots_engine_alloc_free_internal(engine, entry->payload);
+  entry->payload = NULL;
+  entry->payload_len = 0;
+  shoots_engine_alloc_free_internal(engine, entry);
+}
+
+static void shoots_rollback_ledger_tail(shoots_engine_t *engine,
+                                        shoots_ledger_entry_t *entry) {
+  if (engine == NULL || entry == NULL) {
+    return;
+  }
+  if (engine->ledger_tail != entry) {
+    return;
+  }
+  shoots_ledger_entry_t *prev = NULL;
+  shoots_ledger_entry_t *cursor = engine->ledger_head;
+  while (cursor != NULL && cursor != entry) {
+    prev = cursor;
+    cursor = cursor->next;
+  }
+  if (cursor == NULL) {
+    return;
+  }
+  if (prev == NULL) {
+    engine->ledger_head = NULL;
+    engine->ledger_tail = NULL;
+  } else {
+    prev->next = NULL;
+    engine->ledger_tail = prev;
   }
   shoots_evict_result_by_ledger_id(engine, entry->entry_id);
   if (engine->ledger_entry_count > 0) {
@@ -1263,6 +1432,8 @@ shoots_error_code_t shoots_session_create_internal(
   session->last_error = NULL;
   session->active_execution_slot = 0;
   session->has_active_execution = 0;
+  session->terminal_execution_slot = 0;
+  session->has_terminal_execution = 0;
   session->chat_capacity = SHOOTS_SESSION_CHAT_CAPACITY;
   session->chat_size = 0;
   session->chat_head = 0;
@@ -1295,6 +1466,7 @@ shoots_error_code_t shoots_session_create_internal(
   intent_record->session_id = session->session_id;
   intent_record->intent_id_len = intent_len;
   intent_record->intent_id = session->intent_id;
+  intent_record->plan_emitted = 0;
   intent_record->next = NULL;
   if (engine->next_intent_created_at == UINT64_MAX) {
     engine->next_intent_created_at = 0;
@@ -1338,6 +1510,7 @@ shoots_error_code_t shoots_session_attach_internal(
   }
   shoots_error_code_t session_status = shoots_validate_session(engine, session, out_error);
   if (session_status != SHOOTS_OK) {
+    shoots_emit_execution_misuse(engine, "command failure: session invalid");
     return session_status;
   }
   if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
@@ -1360,6 +1533,7 @@ shoots_error_code_t shoots_session_close_internal(
   }
   shoots_error_code_t session_status = shoots_validate_session(engine, session, out_error);
   if (session_status != SHOOTS_OK) {
+    shoots_emit_execution_misuse(engine, "result failure: session invalid");
     return session_status;
   }
   if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
@@ -1740,12 +1914,25 @@ shoots_error_code_t shoots_command_append_internal(
                               "command failure: intent missing");
     return SHOOTS_ERR_INVALID_STATE;
   }
+  shoots_intent_record_t *intent_record =
+      shoots_find_intent_record(engine, session->intent_id);
+  if (intent_record == NULL || !intent_record->plan_emitted) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "plan not prepared");
+    shoots_emit_command_error(engine, session, "plan not prepared",
+                              "command failure: plan not prepared");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   if (session->has_active_execution) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "session execution already active");
     shoots_emit_command_error(engine, session, "session execution already active",
                               "command failure: execution already active");
     return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (session->has_terminal_execution &&
+      execution_slot <= session->terminal_execution_slot) {
+    return shoots_invariant_violation(engine, "execution slot reuse", out_error);
   }
   if (execution_slot == 0) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
@@ -1796,6 +1983,9 @@ shoots_error_code_t shoots_command_append_internal(
                               "command failure: execution slot out of order");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
+  if (shoots_find_result_for_slot(engine, session->session_id, execution_slot) != NULL) {
+    return shoots_invariant_violation(engine, "execution slot already resolved", out_error);
+  }
   size_t command_id_len = strlen(command_id);
   size_t args_len = strlen(args);
   size_t record_bytes = command_id_len + args_len;
@@ -1816,6 +2006,8 @@ shoots_error_code_t shoots_command_append_internal(
       (shoots_command_record_t *)shoots_engine_alloc_internal(
           engine, sizeof(*record), out_error);
   if (record == NULL) {
+    shoots_emit_command_error(engine, session, "command allocation failed",
+                              "command failure: allocation failed");
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   memset(record, 0, sizeof(*record));
@@ -1827,6 +2019,41 @@ shoots_error_code_t shoots_command_append_internal(
   record->command_id_len = command_id_len;
   record->args_len = args_len;
   record->next = NULL;
+
+  char *command_id_copy = (char *)shoots_engine_alloc_internal(
+      engine, command_id_len + 1, out_error);
+  if (command_id_copy == NULL) {
+    shoots_emit_command_error(engine, session, "command allocation failed",
+                              "command failure: allocation failed");
+    shoots_engine_alloc_free_internal(engine, record);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memcpy(command_id_copy, command_id, command_id_len + 1);
+  record->command_id = command_id_copy;
+
+  char *args_copy = (char *)shoots_engine_alloc_internal(
+      engine, args_len + 1, out_error);
+  if (args_copy == NULL) {
+    shoots_emit_command_error(engine, session, "command allocation failed",
+                              "command failure: allocation failed");
+    shoots_engine_alloc_free_internal(engine, record->command_id);
+    record->command_id = NULL;
+    shoots_engine_alloc_free_internal(engine, record);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  memcpy(args_copy, args, args_len + 1);
+  record->args = args_copy;
+
+  shoots_error_code_t transition_status =
+      shoots_session_transition_active_internal(session, execution_slot, out_error);
+  if (transition_status != SHOOTS_OK) {
+    shoots_engine_alloc_free_internal(engine, record->args);
+    record->args = NULL;
+    shoots_engine_alloc_free_internal(engine, record->command_id);
+    record->command_id = NULL;
+    shoots_engine_alloc_free_internal(engine, record);
+    return shoots_invariant_violation(engine, "execution slot transition failed", out_error);
+  }
   if (engine->next_command_seq == UINT64_MAX) {
     engine->next_command_seq = 0;
   } else {
@@ -1837,28 +2064,6 @@ shoots_error_code_t shoots_command_append_internal(
   } else {
     session->next_execution_slot++;
   }
-  session->has_active_execution = 1;
-  session->active_execution_slot = execution_slot;
-
-  char *command_id_copy = (char *)shoots_engine_alloc_internal(
-      engine, command_id_len + 1, out_error);
-  if (command_id_copy == NULL) {
-    shoots_engine_alloc_free_internal(engine, record);
-    return SHOOTS_ERR_OUT_OF_MEMORY;
-  }
-  memcpy(command_id_copy, command_id, command_id_len + 1);
-  record->command_id = command_id_copy;
-
-  char *args_copy = (char *)shoots_engine_alloc_internal(
-      engine, args_len + 1, out_error);
-  if (args_copy == NULL) {
-    shoots_engine_alloc_free_internal(engine, record->command_id);
-    record->command_id = NULL;
-    shoots_engine_alloc_free_internal(engine, record);
-    return SHOOTS_ERR_OUT_OF_MEMORY;
-  }
-  memcpy(args_copy, args, args_len + 1);
-  record->args = args_copy;
 
   shoots_register_command(engine, record);
   engine->commands_entry_count++;
@@ -1912,12 +2117,36 @@ shoots_error_code_t shoots_result_append_internal(
                               "result failure: execution not active");
     return SHOOTS_ERR_INVALID_STATE;
   }
+  if (session->has_terminal_execution &&
+      session->active_execution_slot <= session->terminal_execution_slot) {
+    return shoots_invariant_violation(engine, "execution slot already terminal", out_error);
+  }
+  shoots_command_record_t *command_record =
+      shoots_find_command_for_slot(engine, session->session_id,
+                                   session->active_execution_slot);
+  if (command_record == NULL) {
+    return shoots_invariant_violation(engine, "execution command missing", out_error);
+  }
   if (command_id == NULL || command_id[0] == '\0') {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "command_id is null or empty");
     shoots_emit_command_error(engine, session, "command_id is null or empty",
                               "result failure: command_id invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (strcmp(command_record->command_id, command_id) != 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "command_id mismatch");
+    shoots_emit_command_error(engine, session, "command_id mismatch",
+                              "result failure: command mismatch");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (shoots_find_result_for_slot(engine, session->session_id,
+                                  session->active_execution_slot) != NULL) {
+    return shoots_invariant_violation(engine, "execution already resolved", out_error);
+  }
+  if (shoots_find_result_for_command(engine, command_id) != NULL) {
+    return shoots_invariant_violation(engine, "command already resolved", out_error);
   }
   if (payload == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
@@ -1962,6 +2191,8 @@ shoots_error_code_t shoots_result_append_internal(
   char *ledger_payload = (char *)shoots_engine_alloc_internal(
       engine, ledger_len + 1, out_error);
   if (ledger_payload == NULL) {
+    shoots_emit_command_error(engine, session, "ledger allocation failed",
+                              "result failure: allocation failed");
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   memcpy(ledger_payload, "command_id=", strlen("command_id="));
@@ -1992,9 +2223,14 @@ shoots_error_code_t shoots_result_append_internal(
       (shoots_result_record_t *)shoots_engine_alloc_internal(
           engine, sizeof(*record), out_error);
   if (record == NULL) {
+    shoots_rollback_ledger_tail(engine, ledger_entry);
+    shoots_emit_command_error(engine, session, "result allocation failed",
+                              "result failure: allocation failed");
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   memset(record, 0, sizeof(*record));
+  record->session_id = session->session_id;
+  record->execution_slot = session->active_execution_slot;
   record->ledger_entry_id = ledger_entry->entry_id;
   record->status = status;
   record->command_id_len = command_id_len;
@@ -2003,7 +2239,10 @@ shoots_error_code_t shoots_result_append_internal(
   char *command_id_copy = (char *)shoots_engine_alloc_internal(
       engine, command_id_len + 1, out_error);
   if (command_id_copy == NULL) {
+    shoots_rollback_ledger_tail(engine, ledger_entry);
     shoots_engine_alloc_free_internal(engine, record);
+    shoots_emit_command_error(engine, session, "result allocation failed",
+                              "result failure: allocation failed");
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   memcpy(command_id_copy, command_id, command_id_len + 1);
@@ -2011,9 +2250,12 @@ shoots_error_code_t shoots_result_append_internal(
   char *payload_copy = (char *)shoots_engine_alloc_internal(
       engine, payload_len + 1, out_error);
   if (payload_copy == NULL) {
+    shoots_rollback_ledger_tail(engine, ledger_entry);
     shoots_engine_alloc_free_internal(engine, record->command_id);
     record->command_id = NULL;
     shoots_engine_alloc_free_internal(engine, record);
+    shoots_emit_command_error(engine, session, "result allocation failed",
+                              "result failure: allocation failed");
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   memcpy(payload_copy, payload, payload_len + 1);
@@ -2021,13 +2263,15 @@ shoots_error_code_t shoots_result_append_internal(
   shoots_register_result(engine, record);
   if (status == SHOOTS_RESULT_STATUS_ERROR) {
     shoots_session_set_last_error(session, payload);
-    shoots_ledger_entry_t *error_entry = NULL;
-    shoots_ledger_append_internal(engine, SHOOTS_LEDGER_ENTRY_ERROR,
-                                  "command failure: result error",
-                                  &error_entry, NULL);
   }
-  session->has_active_execution = 0;
-  session->active_execution_slot = 0;
+  shoots_error_code_t transition_status =
+      shoots_session_transition_terminal_internal(session,
+                                                  session->active_execution_slot,
+                                                  out_error);
+  if (transition_status != SHOOTS_OK) {
+    return shoots_invariant_violation(engine, "execution terminal transition failed",
+                                      out_error);
+  }
   shoots_assert_invariants(engine);
   *out_record = record;
   return SHOOTS_OK;
@@ -2252,6 +2496,11 @@ shoots_error_code_t shoots_plan_internal(
   if (ledger_status != SHOOTS_OK) {
     return ledger_status;
   }
+  shoots_intent_record_t *intent_record =
+      shoots_find_intent_record(engine, request->intent_id);
+  if (intent_record != NULL) {
+    intent_record->plan_emitted = 1;
+  }
   shoots_assert_invariants(engine);
   return SHOOTS_OK;
 }
@@ -2323,6 +2572,15 @@ shoots_error_code_t shoots_engine_can_execute_internal(
     shoots_engine_emit_execution_denial(engine, *out_reason);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "session not active");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  shoots_intent_record_t *intent_record =
+      shoots_find_intent_record(engine, session->intent_id);
+  if (intent_record == NULL || !intent_record->plan_emitted) {
+    *out_reason = "plan not prepared";
+    shoots_engine_emit_execution_denial(engine, *out_reason);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "plan not prepared");
     return SHOOTS_ERR_INVALID_STATE;
   }
   if (session->next_execution_slot == 0) {

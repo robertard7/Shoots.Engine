@@ -116,10 +116,13 @@ typedef struct shoots_intent_record {
   uint64_t session_id;
   char    *intent_id;
   size_t   intent_id_len;
+  uint8_t  plan_emitted;
   struct shoots_intent_record *next;
 } shoots_intent_record_t;
 
 typedef struct shoots_result_record {
+  uint64_t session_id;
+  uint64_t execution_slot;
   uint64_t ledger_entry_id;
   shoots_result_status_t status;
   char    *command_id;
@@ -162,6 +165,8 @@ struct shoots_session {
   uint64_t next_execution_slot;
   uint64_t active_execution_slot;
   uint8_t  has_active_execution;
+  uint64_t terminal_execution_slot;
+  uint8_t  has_terminal_execution;
 
   char   *chat_buffer;
   size_t  chat_capacity;
@@ -253,6 +258,16 @@ shoots_error_code_t shoots_session_attach_internal(
 shoots_error_code_t shoots_session_close_internal(
   shoots_engine_t *engine,
   struct shoots_session *session,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_transition_active_internal(
+  struct shoots_session *session,
+  uint64_t execution_slot,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_transition_terminal_internal(
+  struct shoots_session *session,
+  uint64_t execution_slot,
   shoots_error_info_t *out_error);
 
 shoots_error_code_t shoots_session_chat_append_internal(
