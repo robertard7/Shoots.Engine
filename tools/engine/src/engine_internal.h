@@ -86,6 +86,17 @@ typedef struct shoots_tool_constraints {
   shoots_tool_confirm_policy_t confirm_policy;
 } shoots_tool_constraints_t;
 
+#define SHOOTS_TOOL_ID_MIN_LEN 1u
+#define SHOOTS_TOOL_ID_MAX_LEN 64u
+#define SHOOTS_TOOL_VERSION_MIN 1u
+#define SHOOTS_TOOL_VERSION_MAX UINT32_MAX
+#define SHOOTS_TOOL_MAX_ARGS 128u
+#define SHOOTS_TOOL_MAX_BYTES 4096u
+#define SHOOTS_TOOL_DETERMINISM_MASK (SHOOTS_TOOL_DETERMINISM_DETERMINISTIC | \
+                                      SHOOTS_TOOL_DETERMINISM_IDEMPOTENT | \
+                                      SHOOTS_TOOL_DETERMINISM_PURE)
+#define SHOOTS_TOOL_CAPABILITIES_ALLOWED UINT64_MAX
+
 /* ------------------------------------------------------------
  * Planning
  * ------------------------------------------------------------ */
