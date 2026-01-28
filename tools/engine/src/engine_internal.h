@@ -68,6 +68,24 @@ typedef enum shoots_tool_arbitration_result {
   SHOOTS_TOOL_ARBITRATION_REJECT = 1
 } shoots_tool_arbitration_result_t;
 
+typedef enum shoots_tool_confirm_policy {
+  SHOOTS_TOOL_CONFIRM_NONE    = 0,
+  SHOOTS_TOOL_CONFIRM_ALWAYS  = 1,
+  SHOOTS_TOOL_CONFIRM_ON_FAIL = 2
+} shoots_tool_confirm_policy_t;
+
+typedef enum shoots_tool_determinism_flags {
+  SHOOTS_TOOL_DETERMINISM_DETERMINISTIC = 1u << 0,
+  SHOOTS_TOOL_DETERMINISM_IDEMPOTENT    = 1u << 1,
+  SHOOTS_TOOL_DETERMINISM_PURE          = 1u << 2
+} shoots_tool_determinism_flags_t;
+
+typedef struct shoots_tool_constraints {
+  uint32_t max_args;
+  uint32_t max_bytes;
+  shoots_tool_confirm_policy_t confirm_policy;
+} shoots_tool_constraints_t;
+
 /* ------------------------------------------------------------
  * Planning
  * ------------------------------------------------------------ */
@@ -136,7 +154,10 @@ typedef struct shoots_tool_record {
   char    *tool_id;
   size_t   tool_id_len;
   shoots_tool_category_t category;
-  uint64_t capability_mask;
+  uint32_t version;
+  uint64_t capabilities;
+  shoots_tool_constraints_t constraints;
+  uint32_t determinism_flags;
   uint64_t tool_hash;
   struct shoots_tool_record *next;
 } shoots_tool_record_t;
@@ -337,7 +358,10 @@ shoots_error_code_t shoots_tool_register_internal(
   shoots_engine_t *engine,
   const char *tool_id,
   shoots_tool_category_t category,
-  uint64_t capability_mask,
+  uint32_t version,
+  uint64_t capabilities,
+  const shoots_tool_constraints_t *constraints,
+  uint32_t determinism_flags,
   shoots_tool_record_t **out_record,
   shoots_error_info_t *out_error);
 

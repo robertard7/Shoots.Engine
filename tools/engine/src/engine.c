@@ -522,8 +522,14 @@ static shoots_result_record_t *shoots_find_result_for_command(shoots_engine_t *e
 
 static uint64_t shoots_hash_tool_descriptor(const char *tool_id,
                                             shoots_tool_category_t category,
-                                            uint64_t capability_mask) {
+                                            uint32_t version,
+                                            uint64_t capabilities,
+                                            const shoots_tool_constraints_t *constraints,
+                                            uint32_t determinism_flags) {
   uint64_t hash = 14695981039346656037ull;
+  uint32_t max_args = 0;
+  uint32_t max_bytes = 0;
+  shoots_tool_confirm_policy_t confirm_policy = SHOOTS_TOOL_CONFIRM_NONE;
   const unsigned char *cursor = (const unsigned char *)tool_id;
   while (*cursor != '\0') {
     hash ^= (uint64_t)(*cursor);
@@ -534,8 +540,33 @@ static uint64_t shoots_hash_tool_descriptor(const char *tool_id,
     hash ^= (uint64_t)((category >> (index * 8)) & 0xffu);
     hash *= 1099511628211ull;
   }
-  for (size_t index = 0; index < sizeof(capability_mask); index++) {
-    hash ^= (uint64_t)((capability_mask >> (index * 8)) & 0xffu);
+  for (size_t index = 0; index < sizeof(version); index++) {
+    hash ^= (uint64_t)((version >> (index * 8)) & 0xffu);
+    hash *= 1099511628211ull;
+  }
+  for (size_t index = 0; index < sizeof(capabilities); index++) {
+    hash ^= (uint64_t)((capabilities >> (index * 8)) & 0xffu);
+    hash *= 1099511628211ull;
+  }
+  if (constraints != NULL) {
+    max_args = constraints->max_args;
+    max_bytes = constraints->max_bytes;
+    confirm_policy = constraints->confirm_policy;
+  }
+  for (size_t index = 0; index < sizeof(max_args); index++) {
+    hash ^= (uint64_t)((max_args >> (index * 8)) & 0xffu);
+    hash *= 1099511628211ull;
+  }
+  for (size_t index = 0; index < sizeof(max_bytes); index++) {
+    hash ^= (uint64_t)((max_bytes >> (index * 8)) & 0xffu);
+    hash *= 1099511628211ull;
+  }
+  for (size_t index = 0; index < sizeof(confirm_policy); index++) {
+    hash ^= (uint64_t)((confirm_policy >> (index * 8)) & 0xffu);
+    hash *= 1099511628211ull;
+  }
+  for (size_t index = 0; index < sizeof(determinism_flags); index++) {
+    hash ^= (uint64_t)((determinism_flags >> (index * 8)) & 0xffu);
     hash *= 1099511628211ull;
   }
   return hash;
@@ -560,7 +591,10 @@ shoots_error_code_t shoots_tool_register_internal(
   shoots_engine_t *engine,
   const char *tool_id,
   shoots_tool_category_t category,
-  uint64_t capability_mask,
+  uint32_t version,
+  uint64_t capabilities,
+  const shoots_tool_constraints_t *constraints,
+  uint32_t determinism_flags,
   shoots_tool_record_t **out_record,
   shoots_error_info_t *out_error) {
   shoots_error_clear(out_error);
@@ -604,9 +638,20 @@ shoots_error_code_t shoots_tool_register_internal(
   }
   memset(record, 0, sizeof(*record));
   record->category = category;
-  record->capability_mask = capability_mask;
+  record->version = version;
+  record->capabilities = capabilities;
+  if (constraints != NULL) {
+    record->constraints = *constraints;
+  } else {
+    record->constraints.max_args = 0;
+    record->constraints.max_bytes = 0;
+    record->constraints.confirm_policy = SHOOTS_TOOL_CONFIRM_NONE;
+  }
+  record->determinism_flags = determinism_flags;
   record->tool_id_len = tool_id_len;
-  record->tool_hash = shoots_hash_tool_descriptor(tool_id, category, capability_mask);
+  record->tool_hash = shoots_hash_tool_descriptor(tool_id, category, version,
+                                                  capabilities, constraints,
+                                                  determinism_flags);
   record->next = NULL;
   char *tool_id_copy = (char *)shoots_engine_alloc_internal(
       engine, tool_id_len + 1, out_error);
