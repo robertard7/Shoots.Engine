@@ -5,12 +5,12 @@
 #include <stdint.h>
 
 #include "shoots/shoots.h"
+#include "provider_runtime.h"
 
 /* ------------------------------------------------------------
  * Forward declarations
  * ------------------------------------------------------------ */
 
-typedef struct shoots_provider_runtime shoots_provider_runtime_t;
 
 /* ------------------------------------------------------------
  * Engine / model / session state
