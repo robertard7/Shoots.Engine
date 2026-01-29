@@ -1,6 +1,7 @@
 #include "engine_internal.h"
 #include "provider_runtime.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -780,7 +781,8 @@ static uint64_t shoots_plan_hash(const char *intent_id,
     if (tool_id != NULL) {
       hash = shoots_plan_hash_update(hash, tool_id, strlen(tool_id));
     }
-    hash = shoots_plan_hash_update(hash, &reason->code, sizeof(reason->code));
+    uint32_t reason_code = (uint32_t)reason->code;
+    hash = shoots_plan_hash_update(hash, &reason_code, sizeof(reason_code));
     size_t token_len = strnlen(reason->token, sizeof(reason->token));
     if (token_len > 0) {
       hash = shoots_plan_hash_update(hash, reason->token, token_len);
@@ -855,10 +857,8 @@ static shoots_error_code_t shoots_plan_append_stored_entry(
   size_t tool_count,
   shoots_error_info_t *out_error) {
   int required = snprintf(NULL, 0,
-                          "plan_stored plan_id=%llu hash=%llu tools=%zu",
-                          (unsigned long long)plan_id,
-                          (unsigned long long)plan_hash,
-                          tool_count);
+                          "plan_stored plan_id=%" PRIu64 " hash=%" PRIu64 " tools=%zu",
+                          plan_id, plan_hash, tool_count);
   if (required < 0) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "ledger format failed");
@@ -876,10 +876,8 @@ static shoots_error_code_t shoots_plan_append_stored_entry(
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   int written = snprintf(payload, payload_len + 1,
-                         "plan_stored plan_id=%llu hash=%llu tools=%zu",
-                         (unsigned long long)plan_id,
-                         (unsigned long long)plan_hash,
-                         tool_count);
+                         "plan_stored plan_id=%" PRIu64 " hash=%" PRIu64 " tools=%zu",
+                         plan_id, plan_hash, tool_count);
   if (written < 0) {
     shoots_engine_alloc_free_internal(engine, payload);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
