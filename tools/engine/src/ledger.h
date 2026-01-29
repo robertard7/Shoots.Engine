@@ -3,7 +3,18 @@
 
 #include "engine_internal.h"
 
-void ledger_append(shoots_engine_t *engine, const char *entry);
-void ledger_query_type(shoots_engine_t *engine, ledger_type_t type, ledger_result_t *out);
+shoots_error_code_t ledger_append(
+  shoots_engine_t *engine,
+  shoots_ledger_entry_type_t type,
+  const char *entry,
+  shoots_ledger_entry_t **out_entry,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t ledger_query_type(
+  shoots_engine_t *engine,
+  shoots_ledger_entry_type_t type,
+  shoots_ledger_entry_t ***out_entries,
+  size_t *out_count,
+  shoots_error_info_t *out_error);
 
 #endif

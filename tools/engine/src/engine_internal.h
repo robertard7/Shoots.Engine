@@ -68,6 +68,50 @@ typedef enum shoots_tool_arbitration_result {
   SHOOTS_TOOL_ARBITRATION_REJECT = 1
 } shoots_tool_arbitration_result_t;
 
+typedef enum shoots_tool_confirm_policy {
+  SHOOTS_TOOL_CONFIRM_NONE    = 0,
+  SHOOTS_TOOL_CONFIRM_ALWAYS  = 1,
+  SHOOTS_TOOL_CONFIRM_ON_FAIL = 2
+} shoots_tool_confirm_policy_t;
+
+typedef enum shoots_tool_determinism_flags {
+  SHOOTS_TOOL_DETERMINISM_DETERMINISTIC = 1u << 0,
+  SHOOTS_TOOL_DETERMINISM_IDEMPOTENT    = 1u << 1,
+  SHOOTS_TOOL_DETERMINISM_PURE          = 1u << 2
+} shoots_tool_determinism_flags_t;
+
+typedef struct shoots_tool_constraints {
+  uint32_t max_args;
+  uint32_t max_bytes;
+  shoots_tool_confirm_policy_t confirm_policy;
+} shoots_tool_constraints_t;
+
+typedef enum shoots_tool_reject_code {
+  SHOOTS_TOOL_REJECT_OK = 0,
+  SHOOTS_TOOL_REJECT_TOOL_NOT_FOUND = 1,
+  SHOOTS_TOOL_REJECT_CONSTRAINT_MISMATCH = 2,
+  SHOOTS_TOOL_REJECT_CAPABILITY_MISMATCH = 3,
+  SHOOTS_TOOL_REJECT_INVALID_DESCRIPTOR = 4
+} shoots_tool_reject_code_t;
+
+#define SHOOTS_TOOL_REASON_TOKEN_MAX 24u
+
+typedef struct shoots_tool_reject_reason {
+  shoots_tool_reject_code_t code;
+  char token[SHOOTS_TOOL_REASON_TOKEN_MAX];
+} shoots_tool_reject_reason_t;
+
+#define SHOOTS_TOOL_ID_MIN_LEN 1u
+#define SHOOTS_TOOL_ID_MAX_LEN 64u
+#define SHOOTS_TOOL_VERSION_MIN 1u
+#define SHOOTS_TOOL_VERSION_MAX UINT32_MAX
+#define SHOOTS_TOOL_MAX_ARGS 128u
+#define SHOOTS_TOOL_MAX_BYTES 4096u
+#define SHOOTS_TOOL_DETERMINISM_MASK (SHOOTS_TOOL_DETERMINISM_DETERMINISTIC | \
+                                      SHOOTS_TOOL_DETERMINISM_IDEMPOTENT | \
+                                      SHOOTS_TOOL_DETERMINISM_PURE)
+#define SHOOTS_TOOL_CAPABILITIES_ALLOWED UINT64_MAX
+
 /* ------------------------------------------------------------
  * Planning
  * ------------------------------------------------------------ */
@@ -81,7 +125,7 @@ typedef struct shoots_plan_request {
 
 typedef struct shoots_plan_response {
   char   **ordered_tool_ids;
-  char   **rejection_reasons;
+  shoots_tool_reject_reason_t *rejection_reasons;
   size_t   tool_count;
 } shoots_plan_response_t;
 
@@ -116,10 +160,13 @@ typedef struct shoots_intent_record {
   uint64_t session_id;
   char    *intent_id;
   size_t   intent_id_len;
+  uint8_t  plan_emitted;
   struct shoots_intent_record *next;
 } shoots_intent_record_t;
 
 typedef struct shoots_result_record {
+  uint64_t session_id;
+  uint64_t execution_slot;
   uint64_t ledger_entry_id;
   shoots_result_status_t status;
   char    *command_id;
@@ -129,11 +176,25 @@ typedef struct shoots_result_record {
   struct shoots_result_record *next;
 } shoots_result_record_t;
 
+#define SHOOTS_SESSION_MAX_PLANS 4u
+#define SHOOTS_SESSION_PLAN_MAX_TOOLS 64u
+
+typedef struct shoots_plan_record {
+  uint64_t plan_id;
+  uint64_t plan_hash;
+  size_t   tool_count;
+  char   **tool_ids;
+  shoots_tool_reject_reason_t *rejection_reasons;
+} shoots_plan_record_t;
+
 typedef struct shoots_tool_record {
   char    *tool_id;
   size_t   tool_id_len;
   shoots_tool_category_t category;
-  uint64_t capability_mask;
+  uint32_t version;
+  uint64_t capabilities;
+  shoots_tool_constraints_t constraints;
+  uint32_t determinism_flags;
   uint64_t tool_hash;
   struct shoots_tool_record *next;
 } shoots_tool_record_t;
@@ -162,6 +223,11 @@ struct shoots_session {
   uint64_t next_execution_slot;
   uint64_t active_execution_slot;
   uint8_t  has_active_execution;
+  uint64_t terminal_execution_slot;
+  uint8_t  has_terminal_execution;
+  uint64_t next_plan_id;
+  size_t   plan_count;
+  shoots_plan_record_t plans[SHOOTS_SESSION_MAX_PLANS];
 
   char   *chat_buffer;
   size_t  chat_capacity;
@@ -255,6 +321,27 @@ shoots_error_code_t shoots_session_close_internal(
   struct shoots_session *session,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_session_transition_active_internal(
+  struct shoots_session *session,
+  uint64_t execution_slot,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_transition_terminal_internal(
+  struct shoots_session *session,
+  uint64_t execution_slot,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_plan_store_internal(
+  struct shoots_session *session,
+  uint64_t plan_id,
+  uint64_t plan_hash,
+  const char *const *tool_ids,
+  const shoots_tool_reject_reason_t *rejection_reasons,
+  size_t tool_count,
+  shoots_error_info_t *out_error);
+
+void shoots_session_plan_clear_internal(struct shoots_session *session);
+
 shoots_error_code_t shoots_session_chat_append_internal(
   struct shoots_session *session,
   const char *text,
@@ -322,7 +409,10 @@ shoots_error_code_t shoots_tool_register_internal(
   shoots_engine_t *engine,
   const char *tool_id,
   shoots_tool_category_t category,
-  uint64_t capability_mask,
+  uint32_t version,
+  uint64_t capabilities,
+  const shoots_tool_constraints_t *constraints,
+  uint32_t determinism_flags,
   shoots_tool_record_t **out_record,
   shoots_error_info_t *out_error);
 
