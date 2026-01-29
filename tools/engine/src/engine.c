@@ -187,6 +187,8 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     }
   }
   assert(engine->tools_locked <= 1);
+  assert(engine->provider_count <= SHOOTS_ENGINE_MAX_PROVIDERS);
+  assert(engine->providers_locked <= 1);
   if (engine->results_head == NULL) {
     assert(engine->results_tail == NULL);
   } else {
@@ -1306,6 +1308,8 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->magic = SHOOTS_ENGINE_MAGIC;
   engine->allocations_head = NULL;
   engine->provider_runtime = NULL;
+  engine->provider_count = 0;
+  engine->providers_locked = 0;
   engine->models_head = NULL;
   engine->models_tail = NULL;
   engine->sessions_head = NULL;
@@ -1351,6 +1355,7 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
     return runtime_status;
   }
 
+  engine->providers_locked = 1;
   engine->tools_locked = 1;
 
   *out_engine = engine;
@@ -1410,6 +1415,8 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   engine->tools_head = NULL;
   engine->tools_tail = NULL;
   engine->tools_locked = 0;
+  engine->provider_count = 0;
+  engine->providers_locked = 0;
   engine->results_head = NULL;
   engine->results_tail = NULL;
   engine->commands_head = NULL;
