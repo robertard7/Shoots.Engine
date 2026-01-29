@@ -176,6 +176,17 @@ typedef struct shoots_result_record {
   struct shoots_result_record *next;
 } shoots_result_record_t;
 
+#define SHOOTS_SESSION_MAX_PLANS 4u
+#define SHOOTS_SESSION_PLAN_MAX_TOOLS 64u
+
+typedef struct shoots_plan_record {
+  uint64_t plan_id;
+  uint64_t plan_hash;
+  size_t   tool_count;
+  char   **tool_ids;
+  shoots_tool_reject_reason_t *rejection_reasons;
+} shoots_plan_record_t;
+
 typedef struct shoots_tool_record {
   char    *tool_id;
   size_t   tool_id_len;
@@ -214,6 +225,9 @@ struct shoots_session {
   uint8_t  has_active_execution;
   uint64_t terminal_execution_slot;
   uint8_t  has_terminal_execution;
+  uint64_t next_plan_id;
+  size_t   plan_count;
+  shoots_plan_record_t plans[SHOOTS_SESSION_MAX_PLANS];
 
   char   *chat_buffer;
   size_t  chat_capacity;
@@ -316,6 +330,17 @@ shoots_error_code_t shoots_session_transition_terminal_internal(
   struct shoots_session *session,
   uint64_t execution_slot,
   shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_session_plan_store_internal(
+  struct shoots_session *session,
+  uint64_t plan_id,
+  uint64_t plan_hash,
+  const char *const *tool_ids,
+  const shoots_tool_reject_reason_t *rejection_reasons,
+  size_t tool_count,
+  shoots_error_info_t *out_error);
+
+void shoots_session_plan_clear_internal(struct shoots_session *session);
 
 shoots_error_code_t shoots_session_chat_append_internal(
   struct shoots_session *session,
