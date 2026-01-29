@@ -5,12 +5,12 @@
 #include <stdint.h>
 
 #include "shoots/shoots.h"
+#include "provider_runtime.h"
 
 /* ------------------------------------------------------------
  * Forward declarations
  * ------------------------------------------------------------ */
 
-typedef struct shoots_provider_runtime shoots_provider_runtime_t;
 
 /* ------------------------------------------------------------
  * Engine / model / session state
@@ -178,6 +178,7 @@ typedef struct shoots_result_record {
 
 #define SHOOTS_SESSION_MAX_PLANS 4u
 #define SHOOTS_SESSION_PLAN_MAX_TOOLS 64u
+#define SHOOTS_ENGINE_MAX_PROVIDERS 8u
 
 typedef struct shoots_plan_record {
   uint64_t plan_id;
@@ -255,6 +256,9 @@ struct shoots_engine {
   void   *allocations_head;
 
   shoots_provider_runtime_t *provider_runtime;
+  shoots_provider_descriptor_t providers[SHOOTS_ENGINE_MAX_PROVIDERS];
+  size_t provider_count;
+  uint8_t providers_locked;
 
   struct shoots_model   *models_head;
   struct shoots_model   *models_tail;
@@ -302,6 +306,15 @@ void *shoots_engine_alloc_internal(
 void shoots_engine_alloc_free_internal(
   shoots_engine_t *engine,
   void *buffer);
+
+shoots_error_code_t shoots_provider_register_internal(
+  shoots_engine_t *engine,
+  const shoots_provider_descriptor_t *descriptor,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_provider_registry_lock_internal(
+  shoots_engine_t *engine,
+  shoots_error_info_t *out_error);
 
 shoots_error_code_t shoots_session_create_internal(
   shoots_engine_t *engine,

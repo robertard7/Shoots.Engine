@@ -1,6 +1,7 @@
 #include "engine_internal.h"
 #include "provider_runtime.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -186,6 +187,8 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     }
   }
   assert(engine->tools_locked <= 1);
+  assert(engine->provider_count <= SHOOTS_ENGINE_MAX_PROVIDERS);
+  assert(engine->providers_locked <= 1);
   if (engine->results_head == NULL) {
     assert(engine->results_tail == NULL);
   } else {
@@ -754,6 +757,42 @@ static void shoots_tool_reject_reason_set(shoots_tool_reject_reason_t *reason,
   reason->token[token_len] = '\0';
 }
 
+static uint64_t shoots_plan_hash_update(uint64_t hash, const void *bytes, size_t length) {
+  const unsigned char *cursor = (const unsigned char *)bytes;
+  for (size_t index = 0; index < length; index++) {
+    hash ^= (uint64_t)cursor[index];
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
+static uint64_t shoots_plan_hash(const char *intent_id,
+                                 const shoots_plan_response_t *response) {
+  uint64_t hash = 14695981039346656037ull;
+  if (intent_id != NULL) {
+    hash = shoots_plan_hash_update(hash, intent_id, strlen(intent_id));
+  }
+  if (response == NULL) {
+    return hash;
+  }
+  uint64_t tool_count = (uint64_t)response->tool_count;
+  hash = shoots_plan_hash_update(hash, &tool_count, sizeof(tool_count));
+  for (size_t index = 0; index < response->tool_count; index++) {
+    const char *tool_id = response->ordered_tool_ids[index];
+    const shoots_tool_reject_reason_t *reason = &response->rejection_reasons[index];
+    if (tool_id != NULL) {
+      hash = shoots_plan_hash_update(hash, tool_id, strlen(tool_id));
+    }
+    uint32_t reason_code = (uint32_t)reason->code;
+    hash = shoots_plan_hash_update(hash, &reason_code, sizeof(reason_code));
+    size_t token_len = strnlen(reason->token, sizeof(reason->token));
+    if (token_len > 0) {
+      hash = shoots_plan_hash_update(hash, reason->token, token_len);
+    }
+  }
+  return hash;
+}
+
 static shoots_error_code_t shoots_plan_append_entry(
   shoots_engine_t *engine,
   const char *intent_id,
@@ -806,6 +845,47 @@ static shoots_error_code_t shoots_plan_append_entry(
     offset += token_len;
   }
   payload[offset] = '\0';
+  shoots_ledger_entry_t *entry = NULL;
+  shoots_error_code_t status = shoots_ledger_append_internal(
+      engine, SHOOTS_LEDGER_ENTRY_DECISION, payload, &entry, out_error);
+  shoots_engine_alloc_free_internal(engine, payload);
+  return status;
+}
+
+static shoots_error_code_t shoots_plan_append_stored_entry(
+  shoots_engine_t *engine,
+  uint64_t plan_id,
+  uint64_t plan_hash,
+  size_t tool_count,
+  shoots_error_info_t *out_error) {
+  int required = snprintf(NULL, 0,
+                          "plan_stored plan_id=%" PRIu64 " hash=%" PRIu64 " tools=%zu",
+                          plan_id, plan_hash, tool_count);
+  if (required < 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  size_t payload_len = (size_t)required;
+  if (payload_len > SHOOTS_LEDGER_MAX_BYTES) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger payload too large");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  char *payload = (char *)shoots_engine_alloc_internal(
+      engine, payload_len + 1, out_error);
+  if (payload == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  int written = snprintf(payload, payload_len + 1,
+                         "plan_stored plan_id=%" PRIu64 " hash=%" PRIu64 " tools=%zu",
+                         plan_id, plan_hash, tool_count);
+  if (written < 0) {
+    shoots_engine_alloc_free_internal(engine, payload);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   shoots_ledger_entry_t *entry = NULL;
   shoots_error_code_t status = shoots_ledger_append_internal(
       engine, SHOOTS_LEDGER_ENTRY_DECISION, payload, &entry, out_error);
@@ -1228,6 +1308,8 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->magic = SHOOTS_ENGINE_MAGIC;
   engine->allocations_head = NULL;
   engine->provider_runtime = NULL;
+  engine->provider_count = 0;
+  engine->providers_locked = 0;
   engine->models_head = NULL;
   engine->models_tail = NULL;
   engine->sessions_head = NULL;
@@ -1332,6 +1414,8 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   engine->tools_head = NULL;
   engine->tools_tail = NULL;
   engine->tools_locked = 0;
+  engine->provider_count = 0;
+  engine->providers_locked = 0;
   engine->results_head = NULL;
   engine->results_tail = NULL;
   engine->commands_head = NULL;
@@ -1509,6 +1593,7 @@ shoots_error_code_t shoots_session_create_internal(
     engine->next_session_id++;
   }
   session->next_execution_slot = 1;
+  session->next_plan_id = 1;
 
   size_t intent_len = strlen(intent_id);
   char *intent_copy = (char *)shoots_engine_alloc_internal(
@@ -2500,6 +2585,32 @@ shoots_error_code_t shoots_plan_internal(
     shoots_plan_emit_error(engine, "plan failure: intent missing");
     return SHOOTS_ERR_INVALID_STATE;
   }
+  shoots_intent_record_t *intent_record =
+      shoots_find_intent_record(engine, request->intent_id);
+  if (intent_record == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "intent record missing");
+    shoots_plan_emit_error(engine, "plan failure: intent missing");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  shoots_session_t *session = shoots_find_session(engine, intent_record->session_id);
+  if (session == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session not found");
+    shoots_plan_emit_error(engine, "plan failure: session missing");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  shoots_error_code_t session_status = shoots_validate_session(engine, session, out_error);
+  if (session_status != SHOOTS_OK) {
+    shoots_plan_emit_error(engine, "plan failure: session invalid");
+    return session_status;
+  }
+  if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "session not active");
+    shoots_plan_emit_error(engine, "plan failure: session terminal");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   if (request->requested_tool_count > 0 && request->requested_tools == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "requested_tools is null");
@@ -2571,16 +2682,34 @@ shoots_error_code_t shoots_plan_internal(
   response->rejection_reasons = reasons;
   response->tool_count = tool_count;
 
+  if (session->next_plan_id == 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "plan id exhausted");
+    shoots_plan_emit_error(engine, "plan failure: plan id exhausted");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  uint64_t plan_id = session->next_plan_id;
+  uint64_t plan_hash = shoots_plan_hash(request->intent_id, response);
+  shoots_error_code_t store_status = shoots_session_plan_store_internal(
+      session, plan_id, plan_hash,
+      (const char *const *)response->ordered_tool_ids,
+      response->rejection_reasons, response->tool_count, out_error);
+  if (store_status != SHOOTS_OK) {
+    shoots_plan_emit_error(engine, "plan failure: session store failed");
+    return store_status;
+  }
+
   shoots_error_code_t ledger_status = shoots_plan_append_entry(
       engine, request->intent_id, response, out_error);
   if (ledger_status != SHOOTS_OK) {
     return ledger_status;
   }
-  shoots_intent_record_t *intent_record =
-      shoots_find_intent_record(engine, request->intent_id);
-  if (intent_record != NULL) {
-    intent_record->plan_emitted = 1;
+  shoots_error_code_t stored_status = shoots_plan_append_stored_entry(
+      engine, plan_id, plan_hash, response->tool_count, out_error);
+  if (stored_status != SHOOTS_OK) {
+    return stored_status;
   }
+  intent_record->plan_emitted = 1;
   shoots_assert_invariants(engine);
   return SHOOTS_OK;
 }
