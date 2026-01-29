@@ -1416,6 +1416,7 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   engine->tools_locked = 0;
   engine->provider_count = 0;
   engine->providers_locked = 0;
+  memset(engine->providers, 0, sizeof(engine->providers));
   engine->results_head = NULL;
   engine->results_tail = NULL;
   engine->commands_head = NULL;
