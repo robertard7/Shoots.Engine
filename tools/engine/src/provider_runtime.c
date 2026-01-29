@@ -162,3 +162,50 @@ shoots_error_code_t shoots_provider_runtime_validate_ready(
 #endif
   return SHOOTS_OK;
 }
+
+shoots_error_code_t shoots_provider_descriptor_validate(
+  const shoots_provider_descriptor_t *descriptor,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (descriptor == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "descriptor is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (descriptor->provider_id_len == 0 ||
+      descriptor->provider_id_len >= SHOOTS_PROVIDER_ID_MAX) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider_id length invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (descriptor->provider_id[descriptor->provider_id_len] != '\0') {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider_id not terminated");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  for (uint8_t index = 0; index < descriptor->provider_id_len; index++) {
+    if (descriptor->provider_id[index] == '\0') {
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                       "provider_id contains null");
+      return SHOOTS_ERR_INVALID_ARGUMENT;
+    }
+  }
+  if (descriptor->supported_tool_categories == 0 ||
+      (descriptor->supported_tool_categories & ~SHOOTS_PROVIDER_TOOL_CATEGORY_MASK) != 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider categories invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (descriptor->max_concurrency == 0 ||
+      descriptor->max_concurrency > SHOOTS_PROVIDER_MAX_CONCURRENCY) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider concurrency invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if ((descriptor->guarantees_mask & ~SHOOTS_PROVIDER_GUARANTEE_MASK) != 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider guarantees invalid");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  return SHOOTS_OK;
+}
