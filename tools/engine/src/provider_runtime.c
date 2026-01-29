@@ -178,15 +178,29 @@ shoots_error_code_t shoots_provider_descriptor_validate(
                      "provider_id length invalid");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
-  if (descriptor->provider_id[descriptor->provider_id_len] != '\0') {
+  size_t provider_id_len =
+      strnlen(descriptor->provider_id, SHOOTS_PROVIDER_ID_MAX);
+  if (provider_id_len != descriptor->provider_id_len) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
-                     "provider_id not terminated");
+                     "provider_id length mismatch");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   for (uint8_t index = 0; index < descriptor->provider_id_len; index++) {
     if (descriptor->provider_id[index] == '\0') {
       shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                        "provider_id contains null");
+      return SHOOTS_ERR_INVALID_ARGUMENT;
+    }
+  }
+  if (descriptor->provider_id[descriptor->provider_id_len] != '\0') {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider_id not terminated");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  for (size_t index = provider_id_len + 1; index < SHOOTS_PROVIDER_ID_MAX; index++) {
+    if (descriptor->provider_id[index] != '\0') {
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                       "provider_id padding invalid");
       return SHOOTS_ERR_INVALID_ARGUMENT;
     }
   }
