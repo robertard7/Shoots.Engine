@@ -149,6 +149,46 @@ static shoots_error_code_t shoots_provider_emit_register_entry(
   return status_code;
 }
 
+static shoots_error_code_t shoots_provider_emit_lock_entry(
+  shoots_engine_t *engine,
+  const char *status,
+  shoots_error_info_t *out_error) {
+  const char *safe_status = status != NULL ? status : "UNKNOWN";
+  int required = snprintf(NULL, 0,
+                          "provider_lock status=%s",
+                          safe_status);
+  if (required < 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  size_t payload_len = (size_t)required;
+  if (payload_len > SHOOTS_LEDGER_MAX_BYTES) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger payload too large");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  char *payload = (char *)shoots_engine_alloc_internal(
+      engine, payload_len + 1, out_error);
+  if (payload == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  int written = snprintf(payload, payload_len + 1,
+                         "provider_lock status=%s",
+                         safe_status);
+  if (written < 0) {
+    shoots_engine_alloc_free_internal(engine, payload);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  shoots_ledger_entry_t *entry = NULL;
+  shoots_error_code_t status_code = shoots_ledger_append_internal(
+      engine, SHOOTS_LEDGER_ENTRY_DECISION, payload, &entry, out_error);
+  shoots_engine_alloc_free_internal(engine, payload);
+  return status_code;
+}
+
 shoots_error_code_t shoots_provider_runtime_create(
   shoots_engine_t *engine,
   const shoots_config_t *config,
@@ -369,4 +409,23 @@ shoots_error_code_t shoots_provider_register_internal(
     return ledger_status;
   }
   return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_provider_registry_lock_internal(
+  shoots_engine_t *engine,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (engine == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "engine is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  if (engine->providers_locked) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider registry already locked");
+    shoots_provider_emit_lock_entry(engine, "REJECT", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  engine->providers_locked = 1;
+  return shoots_provider_emit_lock_entry(engine, "ACCEPT", out_error);
 }
