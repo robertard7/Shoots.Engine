@@ -1,0 +1,12 @@
+diff --git a/tools/engine/src/engine.c b/tools/engine/src/engine.c
+index ad85038..fd904d2 100644
+--- a/tools/engine/src/engine.c
++++ b/tools/engine/src/engine.c
+@@ -1355,7 +1355,6 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
+     return runtime_status;
+   }
+ 
+-  engine->providers_locked = 1;
+   engine->tools_locked = 1;
+ 
+   *out_engine = engine;

@@ -1355,7 +1355,6 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
     return runtime_status;
   }
 
-  engine->providers_locked = 1;
   engine->tools_locked = 1;
 
   *out_engine = engine;
