@@ -316,6 +316,11 @@ shoots_error_code_t shoots_provider_registry_lock_internal(
   shoots_engine_t *engine,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_provider_unregister_internal(
+  shoots_engine_t *engine,
+  const char *provider_id,
+  shoots_error_info_t *out_error);
+
 shoots_error_code_t shoots_session_create_internal(
   shoots_engine_t *engine,
   const char *intent_id,

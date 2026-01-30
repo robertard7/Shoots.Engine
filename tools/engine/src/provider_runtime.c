@@ -84,6 +84,32 @@ static void shoots_provider_format_id(const shoots_provider_descriptor_t *descri
   }
 }
 
+static void shoots_provider_format_id_value(const char *provider_id,
+                                            char *buffer,
+                                            size_t buffer_len) {
+  if (buffer == NULL || buffer_len == 0) {
+    return;
+  }
+  if (provider_id == NULL) {
+    strncpy(buffer, "(null)", buffer_len);
+    buffer[buffer_len - 1] = '\0';
+    return;
+  }
+  size_t length = 0;
+  for (; length + 1 < buffer_len && length < SHOOTS_PROVIDER_ID_MAX; length++) {
+    char value = provider_id[length];
+    if (value == '\0') {
+      break;
+    }
+    buffer[length] = value;
+  }
+  buffer[length] = '\0';
+  if (length == 0) {
+    strncpy(buffer, "(empty)", buffer_len);
+    buffer[buffer_len - 1] = '\0';
+  }
+}
+
 static shoots_error_code_t shoots_provider_emit_register_entry(
   shoots_engine_t *engine,
   const char *provider_id,
@@ -123,6 +149,71 @@ static shoots_error_code_t shoots_provider_emit_register_entry(
   }
   int written = snprintf(payload, payload_len + 1,
                          "provider_register provider_id=%s status=%s",
+                         safe_provider_id, safe_status);
+  if (written < 0) {
+    shoots_engine_alloc_free_internal(engine, payload);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (reason_required > 0 && reason != NULL && reason[0] != '\0') {
+    int reason_written = snprintf(payload + written,
+                                  payload_len + 1 - (size_t)written,
+                                  " reason=%s",
+                                  safe_reason);
+    if (reason_written < 0) {
+      shoots_engine_alloc_free_internal(engine, payload);
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                       "ledger format failed");
+      return SHOOTS_ERR_INVALID_STATE;
+    }
+  }
+  shoots_ledger_entry_t *entry = NULL;
+  shoots_error_code_t status_code = shoots_ledger_append_internal(
+      engine, SHOOTS_LEDGER_ENTRY_DECISION, payload, &entry, out_error);
+  shoots_engine_alloc_free_internal(engine, payload);
+  return status_code;
+}
+
+static shoots_error_code_t shoots_provider_emit_unregister_entry(
+  shoots_engine_t *engine,
+  const char *provider_id,
+  const char *status,
+  const char *reason,
+  shoots_error_info_t *out_error) {
+  const char *safe_provider_id = provider_id != NULL ? provider_id : "(null)";
+  const char *safe_status = status != NULL ? status : "UNKNOWN";
+  const char *safe_reason = reason != NULL ? reason : "";
+  const char *reason_format = reason != NULL && reason[0] != '\0'
+                                  ? " reason=%s"
+                                  : "%s";
+  int required = snprintf(NULL, 0,
+                          "provider_unregister provider_id=%s status=%s",
+                          safe_provider_id, safe_status);
+  if (required < 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  int reason_required = snprintf(NULL, 0, reason_format, safe_reason);
+  if (reason_required < 0) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  size_t payload_len = (size_t)required + (size_t)reason_required;
+  if (payload_len > SHOOTS_LEDGER_MAX_BYTES) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger payload too large");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  char *payload = (char *)shoots_engine_alloc_internal(
+      engine, payload_len + 1, out_error);
+  if (payload == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  int written = snprintf(payload, payload_len + 1,
+                         "provider_unregister provider_id=%s status=%s",
                          safe_provider_id, safe_status);
   if (written < 0) {
     shoots_engine_alloc_free_internal(engine, payload);
@@ -428,4 +519,70 @@ shoots_error_code_t shoots_provider_registry_lock_internal(
   }
   engine->providers_locked = 1;
   return shoots_provider_emit_lock_entry(engine, "ACCEPT", out_error);
+}
+
+shoots_error_code_t shoots_provider_unregister_internal(
+  shoots_engine_t *engine,
+  const char *provider_id,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (engine == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "engine is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  char provider_id_value[SHOOTS_PROVIDER_ID_MAX];
+  shoots_provider_format_id_value(provider_id, provider_id_value,
+                                  sizeof(provider_id_value));
+  if (engine->providers_locked) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider registry locked");
+    shoots_provider_emit_unregister_entry(engine, provider_id_value, "REJECT",
+                                          "locked", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (provider_id == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider_id is null");
+    shoots_provider_emit_unregister_entry(engine, provider_id_value, "REJECT",
+                                          "invalid_provider_id", NULL);
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  size_t provider_id_len = strnlen(provider_id, SHOOTS_PROVIDER_ID_MAX);
+  if (provider_id_len == 0 || provider_id_len >= SHOOTS_PROVIDER_ID_MAX) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider_id invalid");
+    shoots_provider_emit_unregister_entry(engine, provider_id_value, "REJECT",
+                                          "invalid_provider_id", NULL);
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  size_t match_index = engine->provider_count;
+  for (size_t index = 0; index < engine->provider_count; index++) {
+    const shoots_provider_descriptor_t *existing = &engine->providers[index];
+    if (existing->provider_id_len == provider_id_len &&
+        memcmp(existing->provider_id, provider_id, provider_id_len) == 0) {
+      match_index = index;
+      break;
+    }
+  }
+  if (match_index == engine->provider_count) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider not found");
+    shoots_provider_emit_unregister_entry(engine, provider_id_value, "REJECT",
+                                          "not_found", NULL);
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  for (size_t index = match_index + 1; index < engine->provider_count; index++) {
+    engine->providers[index - 1] = engine->providers[index];
+  }
+  engine->provider_count--;
+  memset(&engine->providers[engine->provider_count], 0,
+         sizeof(engine->providers[engine->provider_count]));
+  shoots_error_code_t ledger_status =
+      shoots_provider_emit_unregister_entry(engine, provider_id_value, "ACCEPT",
+                                            NULL, out_error);
+  if (ledger_status != SHOOTS_OK) {
+    return ledger_status;
+  }
+  return SHOOTS_OK;
 }
