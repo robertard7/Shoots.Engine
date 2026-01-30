@@ -3099,33 +3099,114 @@ shoots_error_code_t shoots_provider_snapshot_export_internal(
   return SHOOTS_OK;
 }
 
-shoots_error_code_t shoots_engine_export_provider_snapshot(
+shoots_error_code_t shoots_engine_export_provider_snapshot_const(
   const shoots_engine_t *engine,
-  char **out_snapshot,
-  size_t *out_length,
+  shoots_provider_snapshot_t **out_snapshot,
   shoots_error_info_t *out_error) {
-  return shoots_provider_snapshot_build(engine, out_snapshot, out_length, out_error);
+  if (out_snapshot == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "output is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_snapshot = NULL;
+  char *payload = NULL;
+  size_t payload_len = 0;
+  shoots_error_code_t status =
+      shoots_provider_snapshot_build(engine, &payload, &payload_len, out_error);
+  if (status != SHOOTS_OK) {
+    return status;
+  }
+  shoots_provider_snapshot_t *snapshot =
+      (shoots_provider_snapshot_t *)shoots_engine_alloc_internal(
+          (shoots_engine_t *)engine, sizeof(*snapshot), out_error);
+  if (snapshot == NULL) {
+    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, payload);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  snapshot->payload = payload;
+  snapshot->payload_len = payload_len;
+  *out_snapshot = snapshot;
+  return SHOOTS_OK;
 }
 
-shoots_error_code_t shoots_engine_export_pending_provider_requests(
+shoots_error_code_t shoots_engine_export_pending_provider_requests_const(
   const shoots_engine_t *engine,
-  shoots_provider_request_t **out_requests,
+  shoots_provider_request_record_t **out_list,
   size_t *out_count,
   shoots_error_info_t *out_error) {
-  return shoots_provider_requests_export_internal((shoots_engine_t *)engine,
-                                                  out_requests,
-                                                  out_count,
-                                                  out_error);
+  shoots_error_clear(out_error);
+  if (out_list == NULL || out_count == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "output is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_list = NULL;
+  *out_count = 0;
+  shoots_error_code_t engine_status =
+      shoots_validate_engine((shoots_engine_t *)engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  size_t pending_count = 0;
+  shoots_provider_request_record_t *cursor = engine->provider_requests_head;
+  while (cursor != NULL) {
+    if (!cursor->received) {
+      pending_count++;
+    }
+    cursor = cursor->next;
+  }
+  if (pending_count == 0) {
+    return SHOOTS_OK;
+  }
+  if (pending_count > SIZE_MAX / sizeof(shoots_provider_request_record_t)) {
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "request export size overflow");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  shoots_provider_request_record_t **records =
+      (shoots_provider_request_record_t **)shoots_engine_alloc_internal(
+          (shoots_engine_t *)engine, pending_count * sizeof(*records), out_error);
+  if (records == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  size_t index = 0;
+  cursor = engine->provider_requests_head;
+  while (cursor != NULL) {
+    if (!cursor->received) {
+      records[index] = cursor;
+      index++;
+    }
+    cursor = cursor->next;
+  }
+  qsort(records, pending_count, sizeof(*records), shoots_provider_request_record_compare);
+  shoots_provider_request_record_t *copy =
+      (shoots_provider_request_record_t *)shoots_engine_alloc_internal(
+          (shoots_engine_t *)engine, pending_count * sizeof(*copy), out_error);
+  if (copy == NULL) {
+    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, records);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  for (size_t i = 0; i < pending_count; i++) {
+    copy[i] = *records[i];
+    copy[i].next = NULL;
+  }
+  shoots_engine_alloc_free_internal((shoots_engine_t *)engine, records);
+  *out_list = copy;
+  *out_count = pending_count;
+  return SHOOTS_OK;
 }
 
-uint8_t shoots_engine_provider_ready(const shoots_engine_t *engine) {
+int shoots_engine_provider_ready(const shoots_engine_t *engine) {
   if (engine == NULL) {
     return 0;
   }
   if (engine->state != SHOOTS_ENGINE_STATE_INITIALIZED) {
     return 0;
   }
-  if (!engine->providers_locked || !engine->provider_system_sealed) {
+  if (!engine->providers_locked) {
+    return 0;
+  }
+  if (!(engine->provider_snapshot_exported || engine->provider_system_sealed)) {
     return 0;
   }
   if (engine->provider_count == 0) {
