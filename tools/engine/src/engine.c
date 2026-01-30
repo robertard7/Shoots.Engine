@@ -195,6 +195,10 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
   assert(engine->tools_locked <= 1);
   assert(engine->provider_count <= SHOOTS_ENGINE_MAX_PROVIDERS);
   assert(engine->providers_locked <= 1);
+  if (engine->provider_system_sealed) {
+    assert(engine->providers_locked);
+    assert(engine->provider_snapshot_exported);
+  }
   for (size_t index = 0; index < engine->provider_count; index++) {
     const shoots_provider_descriptor_t *provider = &engine->providers[index];
     assert(provider->provider_id_len > 0);

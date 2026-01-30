@@ -734,6 +734,12 @@ shoots_error_code_t shoots_provider_registry_lock_internal(
     return SHOOTS_ERR_INVALID_STATE;
   }
   engine->providers_locked = 1;
+#ifndef NDEBUG
+  assert(engine->providers_locked);
+  if (engine->provider_system_sealed) {
+    assert(engine->provider_snapshot_exported);
+  }
+#endif
   if (engine->provider_snapshot_exported) {
     engine->provider_system_sealed = 1;
   }

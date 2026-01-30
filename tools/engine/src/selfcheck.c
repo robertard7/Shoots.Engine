@@ -1,5 +1,6 @@
 #include "engine_internal.h"
 
+#include <stdlib.h>
 #include <string.h>
 #ifndef NDEBUG
 #include <assert.h>
@@ -176,6 +177,15 @@ void selfcheck_run(shoots_engine_t *engine) {
         if (result_match->session_id == provider_request->session_id &&
             result_match->execution_slot == provider_request->execution_slot) {
           result_found = 1;
+          char expected_command_id[64];
+          int expected_len = snprintf(expected_command_id, sizeof(expected_command_id),
+                                      "provider_request=0x%016" PRIx64,
+                                      provider_request->request_id);
+          if (expected_len > 0 &&
+              (size_t)expected_len < sizeof(expected_command_id) &&
+              result_match->command_id != NULL) {
+            assert(strcmp(result_match->command_id, expected_command_id) == 0);
+          }
           break;
         }
         result_match = result_match->next;
@@ -190,8 +200,46 @@ void selfcheck_run(shoots_engine_t *engine) {
       if (session_match->has_terminal_execution) {
         assert(provider_request->execution_slot <= session_match->terminal_execution_slot);
       }
+    } else if (engine->provider_system_sealed) {
+      assert(0 && "pending request after provider seal");
+    }
+    shoots_session_t *terminal_match = engine->sessions_head;
+    while (terminal_match != NULL &&
+           terminal_match->session_id != provider_request->session_id) {
+      terminal_match = terminal_match->next;
+    }
+    if (terminal_match != NULL && terminal_match->has_terminal_execution &&
+        provider_request->execution_slot <= terminal_match->terminal_execution_slot) {
+      assert(provider_request->received);
     }
     provider_request = provider_request->next;
+  }
+  shoots_result_record_t *provider_result = engine->results_head;
+  while (provider_result != NULL) {
+    if (provider_result->command_id != NULL &&
+        strncmp(provider_result->command_id, "provider_request=",
+                strlen("provider_request=")) == 0) {
+      const char *request_id_str = strstr(provider_result->command_id, "0x");
+      assert(request_id_str != NULL);
+      if (request_id_str != NULL) {
+        uint64_t request_id = strtoull(request_id_str, NULL, 16);
+        shoots_provider_request_record_t *request_match =
+            engine->provider_requests_head;
+        int request_found = 0;
+        while (request_match != NULL) {
+          if (request_match->request_id == request_id) {
+            request_found = 1;
+            assert(request_match->received);
+            assert(request_match->session_id == provider_result->session_id);
+            assert(request_match->execution_slot == provider_result->execution_slot);
+            break;
+          }
+          request_match = request_match->next;
+        }
+        assert(request_found);
+      }
+    }
+    provider_result = provider_result->next;
   }
   int terminal_seen = 0;
   shoots_ledger_entry_t *ledger_guard = engine->ledger_head;
@@ -277,6 +325,24 @@ void selfcheck_run(shoots_engine_t *engine) {
       check = check->next;
     }
     result = result->next;
+  }
+  shoots_result_record_t *terminal_result = engine->results_head;
+  while (terminal_result != NULL) {
+    if (terminal_result->command_id != NULL &&
+        strncmp(terminal_result->command_id, "provider_request=",
+                strlen("provider_request=")) == 0) {
+      shoots_result_record_t *terminal_check = terminal_result->next;
+      while (terminal_check != NULL) {
+        if (terminal_check->command_id != NULL &&
+            strncmp(terminal_check->command_id, "provider_request=",
+                    strlen("provider_request=")) == 0 &&
+            terminal_check->session_id == terminal_result->session_id) {
+          assert(terminal_check->execution_slot != terminal_result->execution_slot);
+        }
+        terminal_check = terminal_check->next;
+      }
+    }
+    terminal_result = terminal_result->next;
   }
   shoots_session_t *terminal_session = engine->sessions_head;
   while (terminal_session != NULL) {
