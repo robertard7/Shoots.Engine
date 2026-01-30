@@ -176,6 +176,24 @@ typedef struct shoots_result_record {
   struct shoots_result_record *next;
 } shoots_result_record_t;
 
+typedef struct shoots_provider_request_record {
+  uint64_t request_id;
+  uint64_t session_id;
+  uint64_t plan_id;
+  uint64_t execution_slot;
+  uint8_t  provider_id_len;
+  char     provider_id[SHOOTS_PROVIDER_ID_MAX];
+  uint8_t  tool_id_len;
+  char     tool_id[SHOOTS_PROVIDER_TOOL_ID_MAX];
+  uint32_t tool_version;
+  uint64_t capability_mask;
+  uint64_t input_hash;
+  uint32_t arg_size;
+  uint8_t  arg_blob[SHOOTS_PROVIDER_ARG_MAX_BYTES];
+  uint8_t  received;
+  struct shoots_provider_request_record *next;
+} shoots_provider_request_record_t;
+
 #define SHOOTS_SESSION_MAX_PLANS 4u
 #define SHOOTS_SESSION_PLAN_MAX_TOOLS 64u
 #define SHOOTS_ENGINE_MAX_PROVIDERS 8u
@@ -284,6 +302,9 @@ struct shoots_engine {
   struct shoots_result_record *results_head;
   struct shoots_result_record *results_tail;
 
+  struct shoots_provider_request_record *provider_requests_head;
+  struct shoots_provider_request_record *provider_requests_tail;
+
   shoots_command_record_t *commands_head;
   shoots_command_record_t *commands_tail;
   size_t                   commands_entry_count;
@@ -314,6 +335,41 @@ shoots_error_code_t shoots_provider_register_internal(
 
 shoots_error_code_t shoots_provider_registry_lock_internal(
   shoots_engine_t *engine,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_provider_unregister_internal(
+  shoots_engine_t *engine,
+  const char *provider_id,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_provider_request_mint_internal(
+  shoots_engine_t *engine,
+  shoots_session_t *session,
+  uint64_t plan_id,
+  uint64_t execution_slot,
+  const char *tool_id,
+  const shoots_provider_descriptor_t *provider,
+  uint64_t capability_mask,
+  uint64_t input_hash,
+  const uint8_t *arg_blob,
+  uint32_t arg_size,
+  shoots_provider_request_t *out_request,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_provider_receipt_verify_internal(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_provider_requests_export_internal(
+  shoots_engine_t *engine,
+  shoots_provider_request_t **out_requests,
+  size_t *out_count,
   shoots_error_info_t *out_error);
 
 shoots_error_code_t shoots_session_create_internal(
