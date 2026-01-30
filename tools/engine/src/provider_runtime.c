@@ -1,6 +1,7 @@
 #include "engine_internal.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifndef NDEBUG
 #include <assert.h>
@@ -108,6 +109,110 @@ static void shoots_provider_format_id_value(const char *provider_id,
     strncpy(buffer, "(empty)", buffer_len);
     buffer[buffer_len - 1] = '\0';
   }
+}
+
+static int shoots_provider_terminal_seen(const shoots_engine_t *engine) {
+  if (engine == NULL) {
+    return 0;
+  }
+  const char *prefix = "provider_terminal ";
+  size_t prefix_len = strlen(prefix);
+  shoots_ledger_entry_t *cursor = engine->ledger_head;
+  while (cursor != NULL) {
+    if (cursor->payload != NULL &&
+        strncmp(cursor->payload, prefix, prefix_len) == 0) {
+      return 1;
+    }
+    cursor = cursor->next;
+  }
+  return 0;
+}
+
+static int shoots_provider_request_compare(const void *left, const void *right) {
+  const shoots_provider_request_t *first =
+      (const shoots_provider_request_t *)left;
+  const shoots_provider_request_t *second =
+      (const shoots_provider_request_t *)right;
+  if (first->request_id < second->request_id) {
+    return -1;
+  }
+  if (first->request_id > second->request_id) {
+    return 1;
+  }
+  if (first->session_id < second->session_id) {
+    return -1;
+  }
+  if (first->session_id > second->session_id) {
+    return 1;
+  }
+  if (first->plan_id < second->plan_id) {
+    return -1;
+  }
+  if (first->plan_id > second->plan_id) {
+    return 1;
+  }
+  if (first->execution_slot < second->execution_slot) {
+    return -1;
+  }
+  if (first->execution_slot > second->execution_slot) {
+    return 1;
+  }
+  if (first->provider_id_len < second->provider_id_len) {
+    return -1;
+  }
+  if (first->provider_id_len > second->provider_id_len) {
+    return 1;
+  }
+  if (first->provider_id_len > 0) {
+    int provider_cmp = memcmp(first->provider_id, second->provider_id,
+                              first->provider_id_len);
+    if (provider_cmp != 0) {
+      return provider_cmp;
+    }
+  }
+  if (first->tool_id_len < second->tool_id_len) {
+    return -1;
+  }
+  if (first->tool_id_len > second->tool_id_len) {
+    return 1;
+  }
+  if (first->tool_id_len > 0) {
+    int tool_cmp = memcmp(first->tool_id, second->tool_id, first->tool_id_len);
+    if (tool_cmp != 0) {
+      return tool_cmp;
+    }
+  }
+  if (first->tool_version < second->tool_version) {
+    return -1;
+  }
+  if (first->tool_version > second->tool_version) {
+    return 1;
+  }
+  if (first->capability_mask < second->capability_mask) {
+    return -1;
+  }
+  if (first->capability_mask > second->capability_mask) {
+    return 1;
+  }
+  if (first->input_hash < second->input_hash) {
+    return -1;
+  }
+  if (first->input_hash > second->input_hash) {
+    return 1;
+  }
+  if (first->arg_size < second->arg_size) {
+    return -1;
+  }
+  if (first->arg_size > second->arg_size) {
+    return 1;
+  }
+  if (first->arg_size > 0) {
+    int arg_cmp = memcmp(first->arg_blob, second->arg_blob, first->arg_size);
+    if (arg_cmp != 0) {
+      return arg_cmp;
+    }
+  }
+  return 0;
 }
 
 static shoots_error_code_t shoots_provider_emit_register_entry(
@@ -382,6 +487,10 @@ shoots_error_code_t shoots_provider_runtime_validate_ready(
   }
 #ifndef NDEBUG
   shoots_provider_runtime_assert_invariants(runtime);
+  assert(runtime->state == SHOOTS_PROVIDER_RUNTIME_STATE_READY);
+  assert(runtime->effective_allow_background_threads == 0);
+  assert(runtime->effective_allow_filesystem_io == 0);
+  assert(runtime->effective_allow_network_io == 0);
 #endif
   return SHOOTS_OK;
 }
@@ -461,6 +570,9 @@ shoots_error_code_t shoots_provider_requests_export_internal(
     }
     cursor = cursor->next;
   }
+  if (index > 1) {
+    qsort(requests, index, sizeof(*requests), shoots_provider_request_compare);
+  }
   *out_requests = requests;
   *out_count = index;
   return SHOOTS_OK;
@@ -539,6 +651,18 @@ shoots_error_code_t shoots_provider_register_internal(
   }
   char provider_id[SHOOTS_PROVIDER_ID_MAX];
   shoots_provider_format_id(descriptor, provider_id, sizeof(provider_id));
+  if (engine->provider_system_sealed) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider system sealed");
+    shoots_provider_emit_register_entry(engine, provider_id, "REJECT", "sealed", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (shoots_provider_terminal_seen(engine)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider lifecycle sealed");
+    shoots_provider_emit_register_entry(engine, provider_id, "REJECT", "terminal_guard", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   shoots_error_code_t validation_status =
       shoots_provider_descriptor_validate(descriptor, out_error);
   if (validation_status != SHOOTS_OK) {
@@ -591,6 +715,18 @@ shoots_error_code_t shoots_provider_registry_lock_internal(
                      "engine is null");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
+  if (engine->provider_system_sealed) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider system sealed");
+    shoots_provider_emit_lock_entry(engine, "REJECT", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (shoots_provider_terminal_seen(engine)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider lifecycle sealed");
+    shoots_provider_emit_lock_entry(engine, "REJECT", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   if (engine->providers_locked) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "provider registry already locked");
@@ -598,6 +734,15 @@ shoots_error_code_t shoots_provider_registry_lock_internal(
     return SHOOTS_ERR_INVALID_STATE;
   }
   engine->providers_locked = 1;
+#ifndef NDEBUG
+  assert(engine->providers_locked);
+  if (engine->provider_system_sealed) {
+    assert(engine->provider_snapshot_exported);
+  }
+#endif
+  if (engine->provider_snapshot_exported) {
+    engine->provider_system_sealed = 1;
+  }
   return shoots_provider_emit_lock_entry(engine, "ACCEPT", out_error);
 }
 
@@ -614,6 +759,19 @@ shoots_error_code_t shoots_provider_unregister_internal(
   char provider_id_value[SHOOTS_PROVIDER_ID_MAX];
   shoots_provider_format_id_value(provider_id, provider_id_value,
                                   sizeof(provider_id_value));
+  if (engine->provider_system_sealed) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider system sealed");
+    shoots_provider_emit_unregister_entry(engine, provider_id_value, "REJECT", "sealed", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (shoots_provider_terminal_seen(engine)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider lifecycle sealed");
+    shoots_provider_emit_unregister_entry(engine, provider_id_value, "REJECT",
+                                          "terminal_guard", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   if (engine->providers_locked) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "provider registry locked");

@@ -63,6 +63,11 @@ typedef struct shoots_provider_receipt {
   uint8_t output_blob[SHOOTS_PROVIDER_OUTPUT_MAX_BYTES];
 } shoots_provider_receipt_t;
 
+typedef struct shoots_provider_snapshot {
+  char   *payload;
+  size_t  payload_len;
+} shoots_provider_snapshot_t;
+
 typedef struct shoots_provider_descriptor {
   uint8_t provider_id_len;
   char provider_id[SHOOTS_PROVIDER_ID_MAX];
@@ -70,6 +75,24 @@ typedef struct shoots_provider_descriptor {
   uint32_t max_concurrency;
   uint32_t guarantees_mask;
 } shoots_provider_descriptor_t;
+
+/* BUILDER-ONLY */
+/* READ-ONLY */
+/* FROZEN API — DO NOT EXTEND WITHOUT PHASE BUMP */
+shoots_error_code_t shoots_engine_export_provider_snapshot_const(
+  const shoots_engine_t *engine,
+  shoots_provider_snapshot_t **out_snapshot,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_engine_export_pending_provider_requests_const(
+  const shoots_engine_t *engine,
+  shoots_provider_request_record_t **out_list,
+  size_t *out_count,
+  shoots_error_info_t *out_error);
+
+int shoots_engine_provider_ready(const shoots_engine_t *engine);
+
+/* END BUILDER-ONLY FROZEN PROVIDER QUERIES */
 
 shoots_error_code_t shoots_provider_descriptor_validate(
   const shoots_provider_descriptor_t *descriptor,

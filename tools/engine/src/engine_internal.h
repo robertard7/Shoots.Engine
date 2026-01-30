@@ -277,6 +277,8 @@ struct shoots_engine {
   shoots_provider_descriptor_t providers[SHOOTS_ENGINE_MAX_PROVIDERS];
   size_t provider_count;
   uint8_t providers_locked;
+  uint8_t provider_snapshot_exported;
+  uint8_t provider_system_sealed;
 
   struct shoots_model   *models_head;
   struct shoots_model   *models_tail;
@@ -372,6 +374,11 @@ shoots_error_code_t shoots_provider_requests_export_internal(
   size_t *out_count,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_provider_receipt_import_internal(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error);
+
 shoots_error_code_t shoots_session_create_internal(
   shoots_engine_t *engine,
   const char *intent_id,
@@ -446,6 +453,34 @@ shoots_error_code_t shoots_ledger_query_substring_internal(
   struct shoots_ledger_entry ***out_entries,
   size_t *out_count,
   shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_invariant_violation_internal(
+  shoots_engine_t *engine,
+  const char *message,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_provider_snapshot_export_internal(
+  shoots_engine_t *engine,
+  shoots_provider_snapshot_t **out_snapshot,
+  shoots_error_info_t *out_error);
+
+/* BUILDER-ONLY */
+/* READ-ONLY */
+/* FROZEN API — DO NOT EXTEND WITHOUT PHASE BUMP */
+shoots_error_code_t shoots_engine_export_provider_snapshot_const(
+  const shoots_engine_t *engine,
+  shoots_provider_snapshot_t **out_snapshot,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_engine_export_pending_provider_requests_const(
+  const shoots_engine_t *engine,
+  shoots_provider_request_record_t **out_list,
+  size_t *out_count,
+  shoots_error_info_t *out_error);
+
+int shoots_engine_provider_ready(const shoots_engine_t *engine);
+
+/* END BUILDER-ONLY FROZEN PROVIDER QUERIES */
 
 shoots_error_code_t shoots_command_append_internal(
   shoots_engine_t *engine,

@@ -1,8 +1,9 @@
 #include "engine_internal.h"
 
+#include <stdlib.h>
+#include <string.h>
 #ifndef NDEBUG
 #include <assert.h>
-#include <string.h>
 #endif
 
 static uint64_t selfcheck_hash_tool_descriptor(
@@ -67,11 +68,11 @@ static int selfcheck_reason_code_valid(const char *code_text) {
 }
 
 void selfcheck_run(shoots_engine_t *engine) {
-#ifndef NDEBUG
   if (engine == NULL) {
     return;
   }
 
+#ifndef NDEBUG
   shoots_tool_record_t *tool_cursor = engine->tools_head;
   while (tool_cursor != NULL) {
     assert(tool_cursor->tool_id != NULL);
@@ -129,6 +130,24 @@ void selfcheck_run(shoots_engine_t *engine) {
     }
     ledger_check = ledger_check->next;
   }
+  assert(engine->provider_count <= SHOOTS_ENGINE_MAX_PROVIDERS);
+  assert(engine->providers_locked <= 1);
+  for (size_t index = 0; index < engine->provider_count; index++) {
+    const shoots_provider_descriptor_t *provider = &engine->providers[index];
+    shoots_error_info_t error_info;
+    assert(shoots_provider_descriptor_validate(provider, &error_info) == SHOOTS_OK);
+    for (size_t check = index + 1; check < engine->provider_count; check++) {
+      const shoots_provider_descriptor_t *other = &engine->providers[check];
+      assert(provider->provider_id_len != other->provider_id_len ||
+             memcmp(provider->provider_id, other->provider_id,
+                    provider->provider_id_len) != 0);
+    }
+  }
+  if (engine->provider_runtime != NULL) {
+    assert(shoots_provider_runtime_validate_ready(engine->provider_runtime, NULL) == SHOOTS_OK);
+  } else {
+    assert(engine->state != SHOOTS_ENGINE_STATE_INITIALIZED);
+  }
   shoots_session_t *session = engine->sessions_head;
   while (session != NULL) {
     if (session->has_terminal_execution) {
@@ -143,6 +162,102 @@ void selfcheck_run(shoots_engine_t *engine) {
       }
     }
     session = session->next;
+  }
+  shoots_provider_request_record_t *provider_request = engine->provider_requests_head;
+  uint64_t last_request_id = 0;
+  while (provider_request != NULL) {
+    if (last_request_id != 0) {
+      assert(provider_request->request_id >= last_request_id);
+    }
+    last_request_id = provider_request->request_id;
+    if (provider_request->received) {
+      shoots_result_record_t *result_match = engine->results_head;
+      int result_found = 0;
+      while (result_match != NULL) {
+        if (result_match->session_id == provider_request->session_id &&
+            result_match->execution_slot == provider_request->execution_slot) {
+          result_found = 1;
+          char expected_command_id[64];
+          int expected_len = snprintf(expected_command_id, sizeof(expected_command_id),
+                                      "provider_request=0x%016" PRIx64,
+                                      provider_request->request_id);
+          if (expected_len > 0 &&
+              (size_t)expected_len < sizeof(expected_command_id) &&
+              result_match->command_id != NULL) {
+            assert(strcmp(result_match->command_id, expected_command_id) == 0);
+          }
+          break;
+        }
+        result_match = result_match->next;
+      }
+      assert(result_found);
+      shoots_session_t *session_match = engine->sessions_head;
+      while (session_match != NULL &&
+             session_match->session_id != provider_request->session_id) {
+        session_match = session_match->next;
+      }
+      assert(session_match != NULL);
+      if (session_match->has_terminal_execution) {
+        assert(provider_request->execution_slot <= session_match->terminal_execution_slot);
+      }
+    } else if (engine->provider_system_sealed) {
+      assert(0 && "pending request after provider seal");
+    }
+    shoots_session_t *terminal_match = engine->sessions_head;
+    while (terminal_match != NULL &&
+           terminal_match->session_id != provider_request->session_id) {
+      terminal_match = terminal_match->next;
+    }
+    if (terminal_match != NULL && terminal_match->has_terminal_execution &&
+        provider_request->execution_slot <= terminal_match->terminal_execution_slot) {
+      assert(provider_request->received);
+    }
+    provider_request = provider_request->next;
+  }
+  shoots_result_record_t *provider_result = engine->results_head;
+  while (provider_result != NULL) {
+    if (provider_result->command_id != NULL &&
+        strncmp(provider_result->command_id, "provider_request=",
+                strlen("provider_request=")) == 0) {
+      const char *request_id_str = strstr(provider_result->command_id, "0x");
+      assert(request_id_str != NULL);
+      if (request_id_str != NULL) {
+        uint64_t request_id = strtoull(request_id_str, NULL, 16);
+        shoots_provider_request_record_t *request_match =
+            engine->provider_requests_head;
+        int request_found = 0;
+        while (request_match != NULL) {
+          if (request_match->request_id == request_id) {
+            request_found = 1;
+            assert(request_match->received);
+            assert(request_match->session_id == provider_result->session_id);
+            assert(request_match->execution_slot == provider_result->execution_slot);
+            break;
+          }
+          request_match = request_match->next;
+        }
+        assert(request_found);
+      }
+    }
+    provider_result = provider_result->next;
+  }
+  int terminal_seen = 0;
+  shoots_ledger_entry_t *ledger_guard = engine->ledger_head;
+  while (ledger_guard != NULL) {
+    if (ledger_guard->payload != NULL &&
+        strncmp(ledger_guard->payload, "provider_terminal ", strlen("provider_terminal ")) == 0) {
+      terminal_seen = 1;
+    } else if (terminal_seen && ledger_guard->payload != NULL) {
+      if (strncmp(ledger_guard->payload, "provider_register ",
+                  strlen("provider_register ")) == 0 ||
+          strncmp(ledger_guard->payload, "provider_unregister ",
+                  strlen("provider_unregister ")) == 0 ||
+          strncmp(ledger_guard->payload, "provider_lock ",
+                  strlen("provider_lock ")) == 0) {
+        assert(0 && "provider drift guard violated");
+      }
+    }
+    ledger_guard = ledger_guard->next;
   }
 
   shoots_command_record_t *command = engine->commands_head;
@@ -211,6 +326,41 @@ void selfcheck_run(shoots_engine_t *engine) {
     }
     result = result->next;
   }
+  shoots_result_record_t *terminal_result = engine->results_head;
+  while (terminal_result != NULL) {
+    if (terminal_result->command_id != NULL &&
+        strncmp(terminal_result->command_id, "provider_request=",
+                strlen("provider_request=")) == 0) {
+      shoots_result_record_t *terminal_check = terminal_result->next;
+      while (terminal_check != NULL) {
+        if (terminal_check->command_id != NULL &&
+            strncmp(terminal_check->command_id, "provider_request=",
+                    strlen("provider_request=")) == 0 &&
+            terminal_check->session_id == terminal_result->session_id) {
+          assert(terminal_check->execution_slot != terminal_result->execution_slot);
+        }
+        terminal_check = terminal_check->next;
+      }
+    }
+    terminal_result = terminal_result->next;
+  }
+  shoots_session_t *terminal_session = engine->sessions_head;
+  while (terminal_session != NULL) {
+    if (terminal_session->has_terminal_execution) {
+      shoots_result_record_t *result_match = engine->results_head;
+      int terminal_found = 0;
+      while (result_match != NULL) {
+        if (result_match->session_id == terminal_session->session_id &&
+            result_match->execution_slot == terminal_session->terminal_execution_slot) {
+          terminal_found = 1;
+          break;
+        }
+        result_match = result_match->next;
+      }
+      assert(terminal_found);
+    }
+    terminal_session = terminal_session->next;
+  }
 
   shoots_ledger_entry_t *ledger = engine->ledger_head;
   while (ledger != NULL) {
@@ -228,7 +378,38 @@ void selfcheck_run(shoots_engine_t *engine) {
     }
     ledger = ledger->next;
   }
-#else
-  (void)engine;
 #endif
+  shoots_provider_snapshot_t *snapshot_first = NULL;
+  shoots_provider_snapshot_t *snapshot_second = NULL;
+  shoots_error_info_t snapshot_error;
+  shoots_error_code_t first_status =
+      shoots_provider_snapshot_export_internal(engine, &snapshot_first, &snapshot_error);
+  shoots_error_code_t second_status =
+      shoots_provider_snapshot_export_internal(engine, &snapshot_second, &snapshot_error);
+#ifndef NDEBUG
+  assert(first_status == SHOOTS_OK);
+  assert(second_status == SHOOTS_OK);
+  assert(snapshot_first->payload_len == snapshot_second->payload_len);
+  if (snapshot_first->payload_len > 0) {
+    assert(memcmp(snapshot_first->payload, snapshot_second->payload,
+                  snapshot_first->payload_len) == 0);
+  }
+#else
+  if (first_status != SHOOTS_OK || second_status != SHOOTS_OK ||
+      snapshot_first->payload_len != snapshot_second->payload_len ||
+      (snapshot_first->payload_len > 0 &&
+       memcmp(snapshot_first->payload, snapshot_second->payload,
+              snapshot_first->payload_len) != 0)) {
+    shoots_invariant_violation_internal(engine, "provider snapshot unstable",
+                                        &snapshot_error);
+  }
+#endif
+  if (snapshot_first != NULL) {
+    shoots_engine_alloc_free_internal(engine, snapshot_first->payload);
+    shoots_engine_alloc_free_internal(engine, snapshot_first);
+  }
+  if (snapshot_second != NULL) {
+    shoots_engine_alloc_free_internal(engine, snapshot_second->payload);
+    shoots_engine_alloc_free_internal(engine, snapshot_second);
+  }
 }

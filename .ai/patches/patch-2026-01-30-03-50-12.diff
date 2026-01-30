@@ -1,0 +1,132 @@
+diff --git a/tools/engine/src/engine.c b/tools/engine/src/engine.c
+index b22ae29..318bc8e 100644
+--- a/tools/engine/src/engine.c
++++ b/tools/engine/src/engine.c
+@@ -195,6 +195,10 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
+   assert(engine->tools_locked <= 1);
+   assert(engine->provider_count <= SHOOTS_ENGINE_MAX_PROVIDERS);
+   assert(engine->providers_locked <= 1);
++  if (engine->provider_system_sealed) {
++    assert(engine->providers_locked);
++    assert(engine->provider_snapshot_exported);
++  }
+   for (size_t index = 0; index < engine->provider_count; index++) {
+     const shoots_provider_descriptor_t *provider = &engine->providers[index];
+     assert(provider->provider_id_len > 0);
+diff --git a/tools/engine/src/provider_runtime.c b/tools/engine/src/provider_runtime.c
+index 568fe38..75b9c1e 100644
+--- a/tools/engine/src/provider_runtime.c
++++ b/tools/engine/src/provider_runtime.c
+@@ -734,6 +734,12 @@ shoots_error_code_t shoots_provider_registry_lock_internal(
+     return SHOOTS_ERR_INVALID_STATE;
+   }
+   engine->providers_locked = 1;
++#ifndef NDEBUG
++  assert(engine->providers_locked);
++  if (engine->provider_system_sealed) {
++    assert(engine->provider_snapshot_exported);
++  }
++#endif
+   if (engine->provider_snapshot_exported) {
+     engine->provider_system_sealed = 1;
+   }
+diff --git a/tools/engine/src/selfcheck.c b/tools/engine/src/selfcheck.c
+index 39691e2..87e9007 100644
+--- a/tools/engine/src/selfcheck.c
++++ b/tools/engine/src/selfcheck.c
+@@ -1,5 +1,6 @@
+ #include "engine_internal.h"
+ 
++#include <stdlib.h>
+ #include <string.h>
+ #ifndef NDEBUG
+ #include <assert.h>
+@@ -176,6 +177,15 @@ void selfcheck_run(shoots_engine_t *engine) {
+         if (result_match->session_id == provider_request->session_id &&
+             result_match->execution_slot == provider_request->execution_slot) {
+           result_found = 1;
++          char expected_command_id[64];
++          int expected_len = snprintf(expected_command_id, sizeof(expected_command_id),
++                                      "provider_request=0x%016" PRIx64,
++                                      provider_request->request_id);
++          if (expected_len > 0 &&
++              (size_t)expected_len < sizeof(expected_command_id) &&
++              result_match->command_id != NULL) {
++            assert(strcmp(result_match->command_id, expected_command_id) == 0);
++          }
+           break;
+         }
+         result_match = result_match->next;
+@@ -190,9 +200,47 @@ void selfcheck_run(shoots_engine_t *engine) {
+       if (session_match->has_terminal_execution) {
+         assert(provider_request->execution_slot <= session_match->terminal_execution_slot);
+       }
++    } else if (engine->provider_system_sealed) {
++      assert(0 && "pending request after provider seal");
++    }
++    shoots_session_t *terminal_match = engine->sessions_head;
++    while (terminal_match != NULL &&
++           terminal_match->session_id != provider_request->session_id) {
++      terminal_match = terminal_match->next;
++    }
++    if (terminal_match != NULL && terminal_match->has_terminal_execution &&
++        provider_request->execution_slot <= terminal_match->terminal_execution_slot) {
++      assert(provider_request->received);
+     }
+     provider_request = provider_request->next;
+   }
++  shoots_result_record_t *provider_result = engine->results_head;
++  while (provider_result != NULL) {
++    if (provider_result->command_id != NULL &&
++        strncmp(provider_result->command_id, "provider_request=",
++                strlen("provider_request=")) == 0) {
++      const char *request_id_str = strstr(provider_result->command_id, "0x");
++      assert(request_id_str != NULL);
++      if (request_id_str != NULL) {
++        uint64_t request_id = strtoull(request_id_str, NULL, 16);
++        shoots_provider_request_record_t *request_match =
++            engine->provider_requests_head;
++        int request_found = 0;
++        while (request_match != NULL) {
++          if (request_match->request_id == request_id) {
++            request_found = 1;
++            assert(request_match->received);
++            assert(request_match->session_id == provider_result->session_id);
++            assert(request_match->execution_slot == provider_result->execution_slot);
++            break;
++          }
++          request_match = request_match->next;
++        }
++        assert(request_found);
++      }
++    }
++    provider_result = provider_result->next;
++  }
+   int terminal_seen = 0;
+   shoots_ledger_entry_t *ledger_guard = engine->ledger_head;
+   while (ledger_guard != NULL) {
+@@ -278,6 +326,24 @@ void selfcheck_run(shoots_engine_t *engine) {
+     }
+     result = result->next;
+   }
++  shoots_result_record_t *terminal_result = engine->results_head;
++  while (terminal_result != NULL) {
++    if (terminal_result->command_id != NULL &&
++        strncmp(terminal_result->command_id, "provider_request=",
++                strlen("provider_request=")) == 0) {
++      shoots_result_record_t *terminal_check = terminal_result->next;
++      while (terminal_check != NULL) {
++        if (terminal_check->command_id != NULL &&
++            strncmp(terminal_check->command_id, "provider_request=",
++                    strlen("provider_request=")) == 0 &&
++            terminal_check->session_id == terminal_result->session_id) {
++          assert(terminal_check->execution_slot != terminal_result->execution_slot);
++        }
++        terminal_check = terminal_check->next;
++      }
++    }
++    terminal_result = terminal_result->next;
++  }
+   shoots_session_t *terminal_session = engine->sessions_head;
+   while (terminal_session != NULL) {
+     if (terminal_session->has_terminal_execution) {
