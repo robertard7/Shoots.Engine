@@ -372,6 +372,11 @@ shoots_error_code_t shoots_provider_requests_export_internal(
   size_t *out_count,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_provider_receipt_import_internal(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error);
+
 shoots_error_code_t shoots_session_create_internal(
   shoots_engine_t *engine,
   const char *intent_id,

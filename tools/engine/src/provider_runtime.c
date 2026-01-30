@@ -557,6 +557,23 @@ shoots_error_code_t shoots_provider_requests_export_internal(
   return SHOOTS_OK;
 }
 
+shoots_error_code_t shoots_provider_receipt_import_internal(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (engine == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "engine is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  return shoots_provider_receipt_map_terminal_internal(engine, receipt, out_error);
+}
+
 shoots_error_code_t shoots_provider_descriptor_validate(
   const shoots_provider_descriptor_t *descriptor,
   shoots_error_info_t *out_error) {
