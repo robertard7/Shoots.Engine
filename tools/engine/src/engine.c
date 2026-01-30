@@ -3709,6 +3709,23 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
   return SHOOTS_ERR_UNSUPPORTED;
 }
 
+shoots_error_code_t shoots_provider_receipt_import_internal(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  shoots_error_code_t runtime_status =
+      shoots_provider_runtime_validate_ready(engine->provider_runtime, out_error);
+  if (runtime_status != SHOOTS_OK) {
+    return runtime_status;
+  }
+  return shoots_provider_receipt_map_terminal_internal(engine, receipt, out_error);
+}
+
 shoots_error_code_t shoots_plan_internal(
   shoots_engine_t *engine,
   const shoots_plan_request_t *request,
