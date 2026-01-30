@@ -1,0 +1,196 @@
+diff --git a/tools/engine/src/engine.c b/tools/engine/src/engine.c
+index 50ef5fd..8602937 100644
+--- a/tools/engine/src/engine.c
++++ b/tools/engine/src/engine.c
+@@ -977,6 +977,84 @@ static shoots_error_code_t shoots_provider_receipt_append_decision(
+   return status_code;
+ }
+ 
++static shoots_error_code_t shoots_provider_terminal_append_decision(
++  shoots_engine_t *engine,
++  const char *provider_id,
++  const char *tool_id,
++  uint64_t plan_id,
++  uint64_t execution_slot,
++  uint64_t request_id,
++  const char *result_text,
++  const char *status,
++  const char *reason,
++  shoots_error_info_t *out_error) {
++  const char *safe_provider_id = provider_id != NULL ? provider_id : "(null)";
++  const char *safe_tool_id = tool_id != NULL ? tool_id : "(null)";
++  const char *safe_status = status != NULL ? status : "UNKNOWN";
++  const char *safe_result = result_text != NULL ? result_text : "UNKNOWN";
++  const char *safe_reason = reason != NULL ? reason : "";
++  const char *reason_format = reason != NULL && reason[0] != '\0'
++                                  ? " reason=%s"
++                                  : "%s";
++  int required = snprintf(NULL, 0,
++                          "provider_terminal status=%s provider_id=%s tool_id=%s"
++                          " plan_id=%" PRIu64 " execution_slot=%" PRIu64
++                          " request_id=0x%016" PRIx64 " result=%s",
++                          safe_status, safe_provider_id, safe_tool_id,
++                          plan_id, execution_slot, request_id, safe_result);
++  if (required < 0) {
++    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
++                     "ledger format failed");
++    return SHOOTS_ERR_INVALID_STATE;
++  }
++  int reason_required = snprintf(NULL, 0, reason_format, safe_reason);
++  if (reason_required < 0) {
++    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
++                     "ledger format failed");
++    return SHOOTS_ERR_INVALID_STATE;
++  }
++  size_t payload_len = (size_t)required + (size_t)reason_required;
++  if (payload_len > SHOOTS_LEDGER_MAX_BYTES) {
++    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
++                     "ledger payload too large");
++    return SHOOTS_ERR_INVALID_ARGUMENT;
++  }
++  char *payload = (char *)shoots_engine_alloc_internal(
++      engine, payload_len + 1, out_error);
++  if (payload == NULL) {
++    return SHOOTS_ERR_OUT_OF_MEMORY;
++  }
++  int written = snprintf(payload, payload_len + 1,
++                         "provider_terminal status=%s provider_id=%s tool_id=%s"
++                         " plan_id=%" PRIu64 " execution_slot=%" PRIu64
++                         " request_id=0x%016" PRIx64 " result=%s",
++                         safe_status, safe_provider_id, safe_tool_id,
++                         plan_id, execution_slot, request_id, safe_result);
++  if (written < 0) {
++    shoots_engine_alloc_free_internal(engine, payload);
++    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
++                     "ledger format failed");
++    return SHOOTS_ERR_INVALID_STATE;
++  }
++  if (reason_required > 0 && reason != NULL && reason[0] != '\0') {
++    int reason_written = snprintf(payload + written,
++                                  payload_len + 1 - (size_t)written,
++                                  " reason=%s",
++                                  safe_reason);
++    if (reason_written < 0) {
++      shoots_engine_alloc_free_internal(engine, payload);
++      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
++                       "ledger format failed");
++      return SHOOTS_ERR_INVALID_STATE;
++    }
++  }
++  shoots_ledger_entry_t *entry = NULL;
++  shoots_error_code_t status_code = shoots_ledger_append_internal(
++      engine, SHOOTS_LEDGER_ENTRY_DECISION, payload, &entry, out_error);
++  shoots_engine_alloc_free_internal(engine, payload);
++  return status_code;
++}
++
+ static const char *shoots_provider_result_text(shoots_provider_result_code_t code) {
+   switch (code) {
+     case SHOOTS_PROVIDER_RESULT_SUCCESS:
+@@ -3379,7 +3457,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+     return engine_status;
+   }
+   if (receipt == NULL) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, "(null)", "(null)", 0, 0, 0, "UNKNOWN", "REJECT", "receipt_null", NULL);
+     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                      "receipt is null");
+@@ -3405,7 +3483,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+   const char *result_text = shoots_provider_result_text(receipt->result_code);
+   shoots_session_t *session = shoots_find_session(engine, receipt->session_id);
+   if (session == NULL) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "session_missing", NULL);
+@@ -3415,14 +3493,14 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+   }
+   shoots_error_code_t session_status = shoots_validate_session(engine, session, out_error);
+   if (session_status != SHOOTS_OK) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "session_invalid", NULL);
+     return session_status;
+   }
+   if (session->state != SHOOTS_SESSION_STATE_ACTIVE) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "session_inactive", NULL);
+@@ -3432,7 +3510,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+   }
+   if (!session->has_active_execution ||
+       session->active_execution_slot != receipt->execution_slot) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "execution_slot_inactive", NULL);
+@@ -3442,7 +3520,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+   }
+   if (session->has_terminal_execution &&
+       receipt->execution_slot <= session->terminal_execution_slot) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "execution_slot_terminal", NULL);
+@@ -3450,7 +3528,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+   }
+   if (shoots_find_result_for_slot(engine, session->session_id,
+                                   receipt->execution_slot) != NULL) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "terminal_result_exists", NULL);
+@@ -3463,7 +3541,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+   int command_id_len = snprintf(command_id_buffer, sizeof(command_id_buffer),
+                                 "provider_request=0x%016" PRIx64, receipt->request_id);
+   if (command_id_len < 0 || (size_t)command_id_len >= sizeof(command_id_buffer)) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "command_id_invalid", NULL);
+@@ -3477,7 +3555,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+                              provider_id_value, tool_id_value, receipt->request_id,
+                              result_text, receipt->output_size);
+   if (payload_len < 0) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "payload_invalid", NULL);
+@@ -3486,7 +3564,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+     return SHOOTS_ERR_INVALID_STATE;
+   }
+   if ((size_t)payload_len > SHOOTS_RESULT_MAX_BYTES) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "payload_too_large", NULL);
+@@ -3501,7 +3579,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+                       strlen(" status=") + strlen(status_text) +
+                       strlen(" payload=") + (size_t)payload_len;
+   if (ledger_len > SHOOTS_LEDGER_MAX_BYTES) {
+-    shoots_provider_receipt_append_decision(
++    shoots_provider_terminal_append_decision(
+         engine, provider_id_value, tool_id_value, receipt->plan_id,
+         receipt->execution_slot, receipt->request_id, result_text, "REJECT",
+         "ledger_too_large", NULL);
+@@ -3600,7 +3678,7 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+                                       out_error);
+   }
+   shoots_error_code_t decision_status =
+-      shoots_provider_receipt_append_decision(
++      shoots_provider_terminal_append_decision(
+           engine, provider_id_value, tool_id_value, receipt->plan_id,
+           receipt->execution_slot, receipt->request_id, result_text, "ACCEPT",
+           NULL, out_error);
