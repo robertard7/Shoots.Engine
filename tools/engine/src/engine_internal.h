@@ -359,6 +359,11 @@ shoots_error_code_t shoots_provider_receipt_verify_internal(
   const shoots_provider_receipt_t *receipt,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error);
+
 shoots_error_code_t shoots_session_create_internal(
   shoots_engine_t *engine,
   const char *intent_id,
