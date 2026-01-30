@@ -1009,6 +1009,9 @@ static uint64_t shoots_provider_request_id(
   hash = shoots_request_hash_update(hash, &tool_version, sizeof(tool_version));
   hash = shoots_request_hash_update(hash, &capability_mask, sizeof(capability_mask));
   hash = shoots_request_hash_update(hash, &input_hash, sizeof(input_hash));
+  if (hash == 0) {
+    hash = 1;
+  }
   return hash;
 }
 
@@ -3132,16 +3135,16 @@ shoots_error_code_t shoots_provider_receipt_verify_internal(
   const shoots_provider_receipt_t *receipt,
   shoots_error_info_t *out_error) {
   shoots_error_clear(out_error);
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
   if (receipt == NULL) {
     shoots_provider_receipt_append_decision(
         engine, "(null)", "(null)", 0, 0, 0, "REJECT", "receipt_null", NULL);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "receipt is null");
     return SHOOTS_ERR_INVALID_ARGUMENT;
-  }
-  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
-  if (engine_status != SHOOTS_OK) {
-    return engine_status;
   }
   char provider_id_value[SHOOTS_PROVIDER_ID_MAX];
   char tool_id_value[SHOOTS_PROVIDER_TOOL_ID_MAX];
