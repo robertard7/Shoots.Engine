@@ -3,6 +3,23 @@
 
 #include "engine_internal.h"
 
+/* BUILDER-ONLY FROZEN PROVIDER QUERIES (NO MUTATION) */
+shoots_error_code_t shoots_engine_export_provider_snapshot(
+  const shoots_engine_t *engine,
+  char **out_snapshot,
+  size_t *out_length,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_engine_export_pending_provider_requests(
+  const shoots_engine_t *engine,
+  shoots_provider_request_t **out_requests,
+  size_t *out_count,
+  shoots_error_info_t *out_error);
+
+uint8_t shoots_engine_provider_ready(const shoots_engine_t *engine);
+
+/* END BUILDER-ONLY FROZEN PROVIDER QUERIES */
+
 shoots_error_code_t spine_record_intent(
   shoots_engine_t *engine,
   const char *intent_id,
