@@ -277,6 +277,8 @@ struct shoots_engine {
   shoots_provider_descriptor_t providers[SHOOTS_ENGINE_MAX_PROVIDERS];
   size_t provider_count;
   uint8_t providers_locked;
+  uint8_t provider_snapshot_exported;
+  uint8_t provider_system_sealed;
 
   struct shoots_model   *models_head;
   struct shoots_model   *models_tail;
@@ -452,11 +454,18 @@ shoots_error_code_t shoots_ledger_query_substring_internal(
   size_t *out_count,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_invariant_violation_internal(
+  shoots_engine_t *engine,
+  const char *message,
+  shoots_error_info_t *out_error);
+
 shoots_error_code_t shoots_provider_snapshot_export_internal(
   shoots_engine_t *engine,
   char **out_snapshot,
   size_t *out_length,
   shoots_error_info_t *out_error);
+
+uint8_t shoots_engine_provider_ready(const shoots_engine_t *engine);
 
 shoots_error_code_t shoots_command_append_internal(
   shoots_engine_t *engine,

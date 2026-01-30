@@ -69,6 +69,12 @@ static shoots_error_code_t shoots_invariant_violation(shoots_engine_t *engine,
   return SHOOTS_ERR_INVALID_STATE;
 }
 
+shoots_error_code_t shoots_invariant_violation_internal(shoots_engine_t *engine,
+                                                        const char *message,
+                                                        shoots_error_info_t *out_error) {
+  return shoots_invariant_violation(engine, message, out_error);
+}
+
 static void shoots_assert_invariants(const shoots_engine_t *engine) {
 #ifndef NDEBUG
   if (engine == NULL) {
@@ -1128,6 +1134,18 @@ static uint64_t shoots_provider_registry_digest(const shoots_engine_t *engine) {
   return hash;
 }
 
+static void shoots_provider_maybe_seal(shoots_engine_t *engine) {
+  if (engine == NULL) {
+    return;
+  }
+  if (engine->provider_system_sealed) {
+    return;
+  }
+  if (engine->providers_locked && engine->provider_snapshot_exported) {
+    engine->provider_system_sealed = 1;
+  }
+}
+
 static int shoots_provider_request_record_compare(const void *left, const void *right) {
   const shoots_provider_request_record_t *first =
       *(const shoots_provider_request_record_t *const *)left;
@@ -1956,6 +1974,8 @@ shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
   engine->provider_runtime = NULL;
   engine->provider_count = 0;
   engine->providers_locked = 0;
+  engine->provider_snapshot_exported = 0;
+  engine->provider_system_sealed = 0;
   engine->models_head = NULL;
   engine->models_tail = NULL;
   engine->sessions_head = NULL;
@@ -2717,6 +2737,8 @@ shoots_error_code_t shoots_provider_snapshot_export_internal(
   if (engine_status != SHOOTS_OK) {
     return engine_status;
   }
+  engine->provider_snapshot_exported = 1;
+  shoots_provider_maybe_seal(engine);
   uint64_t registry_digest = shoots_provider_registry_digest(engine);
 
   size_t request_count = 0;
@@ -3055,6 +3077,29 @@ shoots_error_code_t shoots_provider_snapshot_export_internal(
   *out_snapshot = buffer;
   *out_length = total_len;
   return SHOOTS_OK;
+}
+
+uint8_t shoots_engine_provider_ready(const shoots_engine_t *engine) {
+  if (engine == NULL) {
+    return 0;
+  }
+  if (engine->state != SHOOTS_ENGINE_STATE_INITIALIZED) {
+    return 0;
+  }
+  if (!engine->providers_locked || !engine->provider_system_sealed) {
+    return 0;
+  }
+  if (engine->provider_count == 0) {
+    return 0;
+  }
+  shoots_provider_request_record_t *cursor = engine->provider_requests_head;
+  while (cursor != NULL) {
+    if (!cursor->received) {
+      return 0;
+    }
+    cursor = cursor->next;
+  }
+  return 1;
 }
 
 shoots_error_code_t shoots_command_append_internal(

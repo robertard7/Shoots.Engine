@@ -111,6 +111,23 @@ static void shoots_provider_format_id_value(const char *provider_id,
   }
 }
 
+static int shoots_provider_terminal_seen(const shoots_engine_t *engine) {
+  if (engine == NULL) {
+    return 0;
+  }
+  const char *prefix = "provider_terminal ";
+  size_t prefix_len = strlen(prefix);
+  shoots_ledger_entry_t *cursor = engine->ledger_head;
+  while (cursor != NULL) {
+    if (cursor->payload != NULL &&
+        strncmp(cursor->payload, prefix, prefix_len) == 0) {
+      return 1;
+    }
+    cursor = cursor->next;
+  }
+  return 0;
+}
+
 static int shoots_provider_request_compare(const void *left, const void *right) {
   const shoots_provider_request_t *first =
       (const shoots_provider_request_t *)left;
@@ -634,6 +651,18 @@ shoots_error_code_t shoots_provider_register_internal(
   }
   char provider_id[SHOOTS_PROVIDER_ID_MAX];
   shoots_provider_format_id(descriptor, provider_id, sizeof(provider_id));
+  if (engine->provider_system_sealed) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider system sealed");
+    shoots_provider_emit_register_entry(engine, provider_id, "REJECT", "sealed", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (shoots_provider_terminal_seen(engine)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider lifecycle sealed");
+    shoots_provider_emit_register_entry(engine, provider_id, "REJECT", "terminal_guard", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   shoots_error_code_t validation_status =
       shoots_provider_descriptor_validate(descriptor, out_error);
   if (validation_status != SHOOTS_OK) {
@@ -686,6 +715,18 @@ shoots_error_code_t shoots_provider_registry_lock_internal(
                      "engine is null");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
+  if (engine->provider_system_sealed) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider system sealed");
+    shoots_provider_emit_lock_entry(engine, "REJECT", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (shoots_provider_terminal_seen(engine)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider lifecycle sealed");
+    shoots_provider_emit_lock_entry(engine, "REJECT", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   if (engine->providers_locked) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "provider registry already locked");
@@ -693,6 +734,9 @@ shoots_error_code_t shoots_provider_registry_lock_internal(
     return SHOOTS_ERR_INVALID_STATE;
   }
   engine->providers_locked = 1;
+  if (engine->provider_snapshot_exported) {
+    engine->provider_system_sealed = 1;
+  }
   return shoots_provider_emit_lock_entry(engine, "ACCEPT", out_error);
 }
 
@@ -709,6 +753,19 @@ shoots_error_code_t shoots_provider_unregister_internal(
   char provider_id_value[SHOOTS_PROVIDER_ID_MAX];
   shoots_provider_format_id_value(provider_id, provider_id_value,
                                   sizeof(provider_id_value));
+  if (engine->provider_system_sealed) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider system sealed");
+    shoots_provider_emit_unregister_entry(engine, provider_id_value, "REJECT", "sealed", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  if (shoots_provider_terminal_seen(engine)) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "provider lifecycle sealed");
+    shoots_provider_emit_unregister_entry(engine, provider_id_value, "REJECT",
+                                          "terminal_guard", NULL);
+    return SHOOTS_ERR_INVALID_STATE;
+  }
   if (engine->providers_locked) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "provider registry locked");

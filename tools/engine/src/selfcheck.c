@@ -1,8 +1,8 @@
 #include "engine_internal.h"
 
+#include <string.h>
 #ifndef NDEBUG
 #include <assert.h>
-#include <string.h>
 #endif
 
 static uint64_t selfcheck_hash_tool_descriptor(
@@ -67,11 +67,11 @@ static int selfcheck_reason_code_valid(const char *code_text) {
 }
 
 void selfcheck_run(shoots_engine_t *engine) {
-#ifndef NDEBUG
   if (engine == NULL) {
     return;
   }
 
+#ifndef NDEBUG
   shoots_tool_record_t *tool_cursor = engine->tools_head;
   while (tool_cursor != NULL) {
     assert(tool_cursor->tool_id != NULL);
@@ -193,6 +193,24 @@ void selfcheck_run(shoots_engine_t *engine) {
     }
     provider_request = provider_request->next;
   }
+  int terminal_seen = 0;
+  shoots_ledger_entry_t *ledger_guard = engine->ledger_head;
+  while (ledger_guard != NULL) {
+    if (ledger_guard->payload != NULL &&
+        strncmp(ledger_guard->payload, "provider_terminal ", strlen("provider_terminal ")) == 0) {
+      terminal_seen = 1;
+    } else if (terminal_seen && ledger_guard->payload != NULL) {
+      if (strncmp(ledger_guard->payload, "provider_register ",
+                  strlen("provider_register ")) == 0 ||
+          strncmp(ledger_guard->payload, "provider_unregister ",
+                  strlen("provider_unregister ")) == 0 ||
+          strncmp(ledger_guard->payload, "provider_lock ",
+                  strlen("provider_lock ")) == 0) {
+        assert(0 && "provider drift guard violated");
+      }
+    }
+    ledger_guard = ledger_guard->next;
+  }
 
   shoots_command_record_t *command = engine->commands_head;
   while (command != NULL) {
@@ -294,7 +312,40 @@ void selfcheck_run(shoots_engine_t *engine) {
     }
     ledger = ledger->next;
   }
-#else
-  (void)engine;
 #endif
+  char *snapshot_first = NULL;
+  char *snapshot_second = NULL;
+  size_t snapshot_first_len = 0;
+  size_t snapshot_second_len = 0;
+  shoots_error_info_t snapshot_error;
+  shoots_error_code_t first_status =
+      shoots_provider_snapshot_export_internal(engine, &snapshot_first,
+                                                &snapshot_first_len,
+                                                &snapshot_error);
+  shoots_error_code_t second_status =
+      shoots_provider_snapshot_export_internal(engine, &snapshot_second,
+                                                &snapshot_second_len,
+                                                &snapshot_error);
+#ifndef NDEBUG
+  assert(first_status == SHOOTS_OK);
+  assert(second_status == SHOOTS_OK);
+  assert(snapshot_first_len == snapshot_second_len);
+  if (snapshot_first_len > 0) {
+    assert(memcmp(snapshot_first, snapshot_second, snapshot_first_len) == 0);
+  }
+#else
+  if (first_status != SHOOTS_OK || second_status != SHOOTS_OK ||
+      snapshot_first_len != snapshot_second_len ||
+      (snapshot_first_len > 0 &&
+       memcmp(snapshot_first, snapshot_second, snapshot_first_len) != 0)) {
+    shoots_invariant_violation_internal(engine, "provider snapshot unstable",
+                                        &snapshot_error);
+  }
+#endif
+  if (snapshot_first != NULL) {
+    shoots_engine_alloc_free_internal(engine, snapshot_first);
+  }
+  if (snapshot_second != NULL) {
+    shoots_engine_alloc_free_internal(engine, snapshot_second);
+  }
 }
