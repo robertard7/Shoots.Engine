@@ -379,39 +379,37 @@ void selfcheck_run(shoots_engine_t *engine) {
     ledger = ledger->next;
   }
 #endif
-  char *snapshot_first = NULL;
-  char *snapshot_second = NULL;
-  size_t snapshot_first_len = 0;
-  size_t snapshot_second_len = 0;
+  shoots_provider_snapshot_t *snapshot_first = NULL;
+  shoots_provider_snapshot_t *snapshot_second = NULL;
   shoots_error_info_t snapshot_error;
   shoots_error_code_t first_status =
-      shoots_provider_snapshot_export_internal(engine, &snapshot_first,
-                                                &snapshot_first_len,
-                                                &snapshot_error);
+      shoots_provider_snapshot_export_internal(engine, &snapshot_first, &snapshot_error);
   shoots_error_code_t second_status =
-      shoots_provider_snapshot_export_internal(engine, &snapshot_second,
-                                                &snapshot_second_len,
-                                                &snapshot_error);
+      shoots_provider_snapshot_export_internal(engine, &snapshot_second, &snapshot_error);
 #ifndef NDEBUG
   assert(first_status == SHOOTS_OK);
   assert(second_status == SHOOTS_OK);
-  assert(snapshot_first_len == snapshot_second_len);
-  if (snapshot_first_len > 0) {
-    assert(memcmp(snapshot_first, snapshot_second, snapshot_first_len) == 0);
+  assert(snapshot_first->payload_len == snapshot_second->payload_len);
+  if (snapshot_first->payload_len > 0) {
+    assert(memcmp(snapshot_first->payload, snapshot_second->payload,
+                  snapshot_first->payload_len) == 0);
   }
 #else
   if (first_status != SHOOTS_OK || second_status != SHOOTS_OK ||
-      snapshot_first_len != snapshot_second_len ||
-      (snapshot_first_len > 0 &&
-       memcmp(snapshot_first, snapshot_second, snapshot_first_len) != 0)) {
+      snapshot_first->payload_len != snapshot_second->payload_len ||
+      (snapshot_first->payload_len > 0 &&
+       memcmp(snapshot_first->payload, snapshot_second->payload,
+              snapshot_first->payload_len) != 0)) {
     shoots_invariant_violation_internal(engine, "provider snapshot unstable",
                                         &snapshot_error);
   }
 #endif
   if (snapshot_first != NULL) {
+    shoots_engine_alloc_free_internal(engine, snapshot_first->payload);
     shoots_engine_alloc_free_internal(engine, snapshot_first);
   }
   if (snapshot_second != NULL) {
+    shoots_engine_alloc_free_internal(engine, snapshot_second->payload);
     shoots_engine_alloc_free_internal(engine, snapshot_second);
   }
 }

@@ -19,8 +19,7 @@ shoots_error_code_t ledger_query_type(
 
 shoots_error_code_t ledger_provider_snapshot(
   shoots_engine_t *engine,
-  char **out_snapshot,
-  size_t *out_length,
+  shoots_provider_snapshot_t **out_snapshot,
   shoots_error_info_t *out_error);
 
 #endif

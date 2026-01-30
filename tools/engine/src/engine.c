@@ -1138,6 +1138,10 @@ static uint64_t shoots_provider_registry_digest(const shoots_engine_t *engine) {
   return hash;
 }
 
+static shoots_engine_t *shoots_engine_cast_mutable(const shoots_engine_t *engine) {
+  return (shoots_engine_t *)engine;
+}
+
 static void shoots_provider_maybe_seal(shoots_engine_t *engine) {
   if (engine == NULL) {
     return;
@@ -1152,19 +1156,19 @@ static void shoots_provider_maybe_seal(shoots_engine_t *engine) {
 
 static shoots_error_code_t shoots_provider_snapshot_build(
   const shoots_engine_t *engine,
-  char **out_snapshot,
-  size_t *out_length,
+  shoots_provider_snapshot_t *out_snapshot,
   shoots_error_info_t *out_error) {
   shoots_error_clear(out_error);
-  if (out_snapshot == NULL || out_length == NULL) {
+  if (out_snapshot == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "output is null");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
-  *out_snapshot = NULL;
-  *out_length = 0;
+  out_snapshot->payload = NULL;
+  out_snapshot->payload_len = 0;
+  shoots_engine_t *mutable_engine = shoots_engine_cast_mutable(engine);
   shoots_error_code_t engine_status =
-      shoots_validate_engine((shoots_engine_t *)engine, out_error);
+      shoots_validate_engine(mutable_engine, out_error);
   if (engine_status != SHOOTS_OK) {
     return engine_status;
   }
@@ -1179,7 +1183,7 @@ static shoots_error_code_t shoots_provider_snapshot_build(
   shoots_provider_request_record_t **request_records = NULL;
   if (request_count > 0) {
     request_records = (shoots_provider_request_record_t **)shoots_engine_alloc_internal(
-        (shoots_engine_t *)engine, request_count * sizeof(*request_records), out_error);
+        mutable_engine, request_count * sizeof(*request_records), out_error);
     if (request_records == NULL) {
       return SHOOTS_ERR_OUT_OF_MEMORY;
     }
@@ -1205,9 +1209,9 @@ static shoots_error_code_t shoots_provider_snapshot_build(
   shoots_result_record_t **result_records = NULL;
   if (result_count > 0) {
     result_records = (shoots_result_record_t **)shoots_engine_alloc_internal(
-        (shoots_engine_t *)engine, result_count * sizeof(*result_records), out_error);
+        mutable_engine, result_count * sizeof(*result_records), out_error);
     if (result_records == NULL) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
       return SHOOTS_ERR_OUT_OF_MEMORY;
     }
     size_t index = 0;
@@ -1228,8 +1232,8 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                             "provider_registry count=%zu digest=0x%016" PRIx64 "\n",
                             engine->provider_count, registry_digest);
   if (header_len < 0) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "snapshot format failed");
     return SHOOTS_ERR_INVALID_STATE;
@@ -1237,8 +1241,8 @@ static shoots_error_code_t shoots_provider_snapshot_build(
   shoots_error_code_t size_status =
       shoots_snapshot_add_size(&total_len, (size_t)header_len, out_error);
   if (size_status != SHOOTS_OK) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
     return size_status;
   }
   for (size_t index = 0; index < engine->provider_count; index++) {
@@ -1253,24 +1257,24 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                             provider->max_concurrency,
                             provider->guarantees_mask);
     if (line_len < 0) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
       shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                        "snapshot format failed");
       return SHOOTS_ERR_INVALID_STATE;
     }
     size_status = shoots_snapshot_add_size(&total_len, (size_t)line_len, out_error);
     if (size_status != SHOOTS_OK) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
       return size_status;
     }
   }
   int request_header_len = snprintf(NULL, 0, "provider_requests count=%zu\n",
                                     request_count);
   if (request_header_len < 0) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "snapshot format failed");
     return SHOOTS_ERR_INVALID_STATE;
@@ -1279,8 +1283,8 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                                          (size_t)request_header_len,
                                          out_error);
   if (size_status != SHOOTS_OK) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
     return size_status;
   }
   for (size_t index = 0; index < request_count; index++) {
@@ -1307,8 +1311,8 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                               record->input_hash,
                               record->arg_size);
     if (prefix_len < 0) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
       shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                        "snapshot format failed");
       return SHOOTS_ERR_INVALID_STATE;
@@ -1316,24 +1320,24 @@ static shoots_error_code_t shoots_provider_snapshot_build(
     size_t line_len = (size_t)prefix_len + (size_t)record->arg_size * 2u + 1u;
     size_status = shoots_snapshot_add_size(&total_len, line_len, out_error);
     if (size_status != SHOOTS_OK) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
       return size_status;
     }
   }
   int result_header_len = snprintf(NULL, 0, "provider_results count=%zu\n",
                                    result_count);
   if (result_header_len < 0) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "snapshot format failed");
     return SHOOTS_ERR_INVALID_STATE;
   }
   size_status = shoots_snapshot_add_size(&total_len, (size_t)result_header_len, out_error);
   if (size_status != SHOOTS_OK) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
     return size_status;
   }
   for (size_t index = 0; index < result_count; index++) {
@@ -1353,32 +1357,32 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                             result->status,
                             payload);
     if (line_len < 0) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
       shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                        "snapshot format failed");
       return SHOOTS_ERR_INVALID_STATE;
     }
     size_status = shoots_snapshot_add_size(&total_len, (size_t)line_len, out_error);
     if (size_status != SHOOTS_OK) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
       return size_status;
     }
   }
   if (total_len > SIZE_MAX - 1) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
     shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
                      "snapshot size overflow");
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   char *buffer =
-      (char *)shoots_engine_alloc_internal((shoots_engine_t *)engine,
+      (char *)shoots_engine_alloc_internal(mutable_engine,
                                            total_len + 1, out_error);
   if (buffer == NULL) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   size_t offset = 0;
@@ -1386,9 +1390,9 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                          "provider_registry count=%zu digest=0x%016" PRIx64 "\n",
                          engine->provider_count, registry_digest);
   if (written < 0) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, buffer);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, buffer);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "snapshot format failed");
     return SHOOTS_ERR_INVALID_STATE;
@@ -1406,9 +1410,9 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                        provider->max_concurrency,
                        provider->guarantees_mask);
     if (written < 0) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, buffer);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, buffer);
       shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                        "snapshot format failed");
       return SHOOTS_ERR_INVALID_STATE;
@@ -1418,9 +1422,9 @@ static shoots_error_code_t shoots_provider_snapshot_build(
   written = snprintf(buffer + offset, total_len + 1 - offset,
                      "provider_requests count=%zu\n", request_count);
   if (written < 0) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, buffer);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, buffer);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "snapshot format failed");
     return SHOOTS_ERR_INVALID_STATE;
@@ -1450,9 +1454,9 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                        record->input_hash,
                        record->arg_size);
     if (written < 0) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, buffer);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, buffer);
       shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                        "snapshot format failed");
       return SHOOTS_ERR_INVALID_STATE;
@@ -1468,9 +1472,9 @@ static shoots_error_code_t shoots_provider_snapshot_build(
   written = snprintf(buffer + offset, total_len + 1 - offset,
                      "provider_results count=%zu\n", result_count);
   if (written < 0) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, buffer);
+    shoots_engine_alloc_free_internal(mutable_engine, request_records);
+    shoots_engine_alloc_free_internal(mutable_engine, result_records);
+    shoots_engine_alloc_free_internal(mutable_engine, buffer);
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                      "snapshot format failed");
     return SHOOTS_ERR_INVALID_STATE;
@@ -1493,9 +1497,9 @@ static shoots_error_code_t shoots_provider_snapshot_build(
                        result->status,
                        payload);
     if (written < 0) {
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
-      shoots_engine_alloc_free_internal((shoots_engine_t *)engine, buffer);
+      shoots_engine_alloc_free_internal(mutable_engine, request_records);
+      shoots_engine_alloc_free_internal(mutable_engine, result_records);
+      shoots_engine_alloc_free_internal(mutable_engine, buffer);
       shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
                        "snapshot format failed");
       return SHOOTS_ERR_INVALID_STATE;
@@ -1503,10 +1507,10 @@ static shoots_error_code_t shoots_provider_snapshot_build(
     offset += (size_t)written;
   }
   buffer[offset] = '\0';
-  shoots_engine_alloc_free_internal((shoots_engine_t *)engine, request_records);
-  shoots_engine_alloc_free_internal((shoots_engine_t *)engine, result_records);
-  *out_snapshot = buffer;
-  *out_length = total_len;
+  shoots_engine_alloc_free_internal(mutable_engine, request_records);
+  shoots_engine_alloc_free_internal(mutable_engine, result_records);
+  out_snapshot->payload = buffer;
+  out_snapshot->payload_len = total_len;
   return SHOOTS_OK;
 }
 
@@ -3086,14 +3090,28 @@ shoots_error_code_t shoots_ledger_query_substring_internal(
 
 shoots_error_code_t shoots_provider_snapshot_export_internal(
   shoots_engine_t *engine,
-  char **out_snapshot,
-  size_t *out_length,
+  shoots_provider_snapshot_t **out_snapshot,
   shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_snapshot == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "output is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_snapshot = NULL;
+  shoots_provider_snapshot_t *snapshot =
+      (shoots_provider_snapshot_t *)shoots_engine_alloc_internal(
+          engine, sizeof(*snapshot), out_error);
+  if (snapshot == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
   shoots_error_code_t status =
-      shoots_provider_snapshot_build(engine, out_snapshot, out_length, out_error);
+      shoots_provider_snapshot_build(engine, snapshot, out_error);
   if (status != SHOOTS_OK) {
+    shoots_engine_alloc_free_internal(engine, snapshot);
     return status;
   }
+  *out_snapshot = snapshot;
   engine->provider_snapshot_exported = 1;
   shoots_provider_maybe_seal(engine);
   return SHOOTS_OK;
@@ -3109,22 +3127,18 @@ shoots_error_code_t shoots_engine_export_provider_snapshot_const(
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   *out_snapshot = NULL;
-  char *payload = NULL;
-  size_t payload_len = 0;
-  shoots_error_code_t status =
-      shoots_provider_snapshot_build(engine, &payload, &payload_len, out_error);
-  if (status != SHOOTS_OK) {
-    return status;
-  }
   shoots_provider_snapshot_t *snapshot =
       (shoots_provider_snapshot_t *)shoots_engine_alloc_internal(
-          (shoots_engine_t *)engine, sizeof(*snapshot), out_error);
+          shoots_engine_cast_mutable(engine), sizeof(*snapshot), out_error);
   if (snapshot == NULL) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, payload);
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
-  snapshot->payload = payload;
-  snapshot->payload_len = payload_len;
+  shoots_error_code_t status =
+      shoots_provider_snapshot_build(engine, snapshot, out_error);
+  if (status != SHOOTS_OK) {
+    shoots_engine_alloc_free_internal(shoots_engine_cast_mutable(engine), snapshot);
+    return status;
+  }
   *out_snapshot = snapshot;
   return SHOOTS_OK;
 }
@@ -3143,7 +3157,7 @@ shoots_error_code_t shoots_engine_export_pending_provider_requests_const(
   *out_list = NULL;
   *out_count = 0;
   shoots_error_code_t engine_status =
-      shoots_validate_engine((shoots_engine_t *)engine, out_error);
+      shoots_validate_engine(shoots_engine_cast_mutable(engine), out_error);
   if (engine_status != SHOOTS_OK) {
     return engine_status;
   }
@@ -3165,7 +3179,7 @@ shoots_error_code_t shoots_engine_export_pending_provider_requests_const(
   }
   shoots_provider_request_record_t **records =
       (shoots_provider_request_record_t **)shoots_engine_alloc_internal(
-          (shoots_engine_t *)engine, pending_count * sizeof(*records), out_error);
+          shoots_engine_cast_mutable(engine), pending_count * sizeof(*records), out_error);
   if (records == NULL) {
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
@@ -3181,16 +3195,16 @@ shoots_error_code_t shoots_engine_export_pending_provider_requests_const(
   qsort(records, pending_count, sizeof(*records), shoots_provider_request_record_compare);
   shoots_provider_request_record_t *copy =
       (shoots_provider_request_record_t *)shoots_engine_alloc_internal(
-          (shoots_engine_t *)engine, pending_count * sizeof(*copy), out_error);
+          shoots_engine_cast_mutable(engine), pending_count * sizeof(*copy), out_error);
   if (copy == NULL) {
-    shoots_engine_alloc_free_internal((shoots_engine_t *)engine, records);
+    shoots_engine_alloc_free_internal(shoots_engine_cast_mutable(engine), records);
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   for (size_t i = 0; i < pending_count; i++) {
     copy[i] = *records[i];
     copy[i].next = NULL;
   }
-  shoots_engine_alloc_free_internal((shoots_engine_t *)engine, records);
+  shoots_engine_alloc_free_internal(shoots_engine_cast_mutable(engine), records);
   *out_list = copy;
   *out_count = pending_count;
   return SHOOTS_OK;

@@ -20,9 +20,8 @@ shoots_error_code_t ledger_query_type(
 
 shoots_error_code_t ledger_provider_snapshot(
   shoots_engine_t *engine,
-  char **out_snapshot,
-  size_t *out_length,
+  shoots_provider_snapshot_t **out_snapshot,
   shoots_error_info_t *out_error) {
   return shoots_provider_snapshot_export_internal(
-      engine, out_snapshot, out_length, out_error);
+      engine, out_snapshot, out_error);
 }

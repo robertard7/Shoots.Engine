@@ -461,8 +461,7 @@ shoots_error_code_t shoots_invariant_violation_internal(
 
 shoots_error_code_t shoots_provider_snapshot_export_internal(
   shoots_engine_t *engine,
-  char **out_snapshot,
-  size_t *out_length,
+  shoots_provider_snapshot_t **out_snapshot,
   shoots_error_info_t *out_error);
 
 /* BUILDER-ONLY */
