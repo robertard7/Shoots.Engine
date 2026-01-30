@@ -33,4 +33,9 @@ shoots_error_code_t spine_mint_provider_request(
   shoots_provider_request_t *out_request,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t spine_verify_provider_receipt(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error);
+
 #endif

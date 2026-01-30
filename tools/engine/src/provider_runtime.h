@@ -35,6 +35,7 @@ typedef struct shoots_provider_request {
   uint64_t session_id;
   uint64_t plan_id;
   uint64_t execution_slot;
+  uint64_t request_id;
   uint8_t provider_id_len;
   char provider_id[SHOOTS_PROVIDER_ID_MAX];
   uint8_t tool_id_len;
@@ -50,6 +51,9 @@ typedef struct shoots_provider_receipt {
   uint64_t session_id;
   uint64_t plan_id;
   uint64_t execution_slot;
+  uint64_t request_id;
+  uint8_t provider_id_len;
+  char provider_id[SHOOTS_PROVIDER_ID_MAX];
   uint8_t tool_id_len;
   char tool_id[SHOOTS_PROVIDER_TOOL_ID_MAX];
   uint32_t tool_version;

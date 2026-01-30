@@ -38,3 +38,10 @@ shoots_error_code_t spine_mint_provider_request(
       engine, session, plan_id, execution_slot, tool_id, provider,
       capability_mask, input_hash, arg_blob, arg_size, out_request, out_error);
 }
+
+shoots_error_code_t spine_verify_provider_receipt(
+  shoots_engine_t *engine,
+  const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error) {
+  return shoots_provider_receipt_verify_internal(engine, receipt, out_error);
+}
