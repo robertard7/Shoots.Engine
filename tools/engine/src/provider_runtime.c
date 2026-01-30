@@ -1,6 +1,7 @@
 #include "engine_internal.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifndef NDEBUG
 #include <assert.h>
@@ -108,6 +109,93 @@ static void shoots_provider_format_id_value(const char *provider_id,
     strncpy(buffer, "(empty)", buffer_len);
     buffer[buffer_len - 1] = '\0';
   }
+}
+
+static int shoots_provider_request_compare(const void *left, const void *right) {
+  const shoots_provider_request_t *first =
+      (const shoots_provider_request_t *)left;
+  const shoots_provider_request_t *second =
+      (const shoots_provider_request_t *)right;
+  if (first->request_id < second->request_id) {
+    return -1;
+  }
+  if (first->request_id > second->request_id) {
+    return 1;
+  }
+  if (first->session_id < second->session_id) {
+    return -1;
+  }
+  if (first->session_id > second->session_id) {
+    return 1;
+  }
+  if (first->plan_id < second->plan_id) {
+    return -1;
+  }
+  if (first->plan_id > second->plan_id) {
+    return 1;
+  }
+  if (first->execution_slot < second->execution_slot) {
+    return -1;
+  }
+  if (first->execution_slot > second->execution_slot) {
+    return 1;
+  }
+  if (first->provider_id_len < second->provider_id_len) {
+    return -1;
+  }
+  if (first->provider_id_len > second->provider_id_len) {
+    return 1;
+  }
+  if (first->provider_id_len > 0) {
+    int provider_cmp = memcmp(first->provider_id, second->provider_id,
+                              first->provider_id_len);
+    if (provider_cmp != 0) {
+      return provider_cmp;
+    }
+  }
+  if (first->tool_id_len < second->tool_id_len) {
+    return -1;
+  }
+  if (first->tool_id_len > second->tool_id_len) {
+    return 1;
+  }
+  if (first->tool_id_len > 0) {
+    int tool_cmp = memcmp(first->tool_id, second->tool_id, first->tool_id_len);
+    if (tool_cmp != 0) {
+      return tool_cmp;
+    }
+  }
+  if (first->tool_version < second->tool_version) {
+    return -1;
+  }
+  if (first->tool_version > second->tool_version) {
+    return 1;
+  }
+  if (first->capability_mask < second->capability_mask) {
+    return -1;
+  }
+  if (first->capability_mask > second->capability_mask) {
+    return 1;
+  }
+  if (first->input_hash < second->input_hash) {
+    return -1;
+  }
+  if (first->input_hash > second->input_hash) {
+    return 1;
+  }
+  if (first->arg_size < second->arg_size) {
+    return -1;
+  }
+  if (first->arg_size > second->arg_size) {
+    return 1;
+  }
+  if (first->arg_size > 0) {
+    int arg_cmp = memcmp(first->arg_blob, second->arg_blob, first->arg_size);
+    if (arg_cmp != 0) {
+      return arg_cmp;
+    }
+  }
+  return 0;
 }
 
 static shoots_error_code_t shoots_provider_emit_register_entry(
@@ -460,6 +548,9 @@ shoots_error_code_t shoots_provider_requests_export_internal(
       index++;
     }
     cursor = cursor->next;
+  }
+  if (index > 1) {
+    qsort(requests, index, sizeof(*requests), shoots_provider_request_compare);
   }
   *out_requests = requests;
   *out_count = index;

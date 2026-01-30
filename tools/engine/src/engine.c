@@ -1114,13 +1114,28 @@ static void shoots_register_provider_request(
   if (engine == NULL || record == NULL) {
     return;
   }
-  if (engine->provider_requests_tail == NULL) {
+  record->next = NULL;
+  if (engine->provider_requests_head == NULL) {
     engine->provider_requests_head = record;
     engine->provider_requests_tail = record;
     return;
   }
-  engine->provider_requests_tail->next = record;
-  engine->provider_requests_tail = record;
+  shoots_provider_request_record_t *prev = NULL;
+  shoots_provider_request_record_t *cursor = engine->provider_requests_head;
+  while (cursor != NULL && cursor->request_id <= record->request_id) {
+    prev = cursor;
+    cursor = cursor->next;
+  }
+  if (prev == NULL) {
+    record->next = engine->provider_requests_head;
+    engine->provider_requests_head = record;
+  } else {
+    record->next = cursor;
+    prev->next = record;
+  }
+  if (cursor == NULL) {
+    engine->provider_requests_tail = record;
+  }
 }
 
 static shoots_provider_request_record_t *shoots_find_provider_request(
