@@ -1,0 +1,70 @@
+diff --git a/tools/engine/src/engine.c b/tools/engine/src/engine.c
+index fd13f2e..f95358b 100644
+--- a/tools/engine/src/engine.c
++++ b/tools/engine/src/engine.c
+@@ -3708,6 +3708,32 @@ shoots_error_code_t shoots_tool_invoke_internal(
+                      "ledger payload too large");
+     return SHOOTS_ERR_INVALID_ARGUMENT;
+   }
++  char *payload = (char *)shoots_engine_alloc_internal(
++      engine, payload_len + 1, out_error);
++  if (payload == NULL) {
++    return SHOOTS_ERR_OUT_OF_MEMORY;
++  }
++  int written = snprintf(payload, payload_len + 1,
++                         "tool_invoke tool_id=%s status=REJECT reason=%s",
++                         safe_tool_id, reason);
++  if (written < 0) {
++    shoots_engine_alloc_free_internal(engine, payload);
++    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
++                     "ledger format failed");
++    return SHOOTS_ERR_INVALID_STATE;
++  }
++  shoots_ledger_entry_t *entry = NULL;
++  shoots_error_code_t status = shoots_ledger_append_internal(
++      engine, SHOOTS_LEDGER_ENTRY_ERROR, payload, &entry, out_error);
++  shoots_engine_alloc_free_internal(engine, payload);
++  if (status != SHOOTS_OK) {
++    return status;
++  }
++  shoots_error_set(out_error, SHOOTS_ERR_UNSUPPORTED, SHOOTS_SEVERITY_RECOVERABLE,
++                   "tool invocation not implemented");
++  return SHOOTS_ERR_UNSUPPORTED;
++}
++
+ shoots_error_code_t shoots_provider_request_mint_internal(
+   shoots_engine_t *engine,
+   shoots_session_t *session,
+@@ -4449,32 +4475,6 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
+   return SHOOTS_OK;
+ }
+ 
+-  char *payload = (char *)shoots_engine_alloc_internal(
+-      engine, payload_len + 1, out_error);
+-  if (payload == NULL) {
+-    return SHOOTS_ERR_OUT_OF_MEMORY;
+-  }
+-  int written = snprintf(payload, payload_len + 1,
+-                         "tool_invoke tool_id=%s status=REJECT reason=%s",
+-                         safe_tool_id, reason);
+-  if (written < 0) {
+-    shoots_engine_alloc_free_internal(engine, payload);
+-    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+-                     "ledger format failed");
+-    return SHOOTS_ERR_INVALID_STATE;
+-  }
+-  shoots_ledger_entry_t *entry = NULL;
+-  shoots_error_code_t status = shoots_ledger_append_internal(
+-      engine, SHOOTS_LEDGER_ENTRY_ERROR, payload, &entry, out_error);
+-  shoots_engine_alloc_free_internal(engine, payload);
+-  if (status != SHOOTS_OK) {
+-    return status;
+-  }
+-  shoots_error_set(out_error, SHOOTS_ERR_UNSUPPORTED, SHOOTS_SEVERITY_RECOVERABLE,
+-                   "tool invocation not implemented");
+-  return SHOOTS_ERR_UNSUPPORTED;
+-}
+-
+ shoots_error_code_t shoots_provider_receipt_import_internal(
+   shoots_engine_t *engine,
+   const shoots_provider_receipt_t *receipt,
