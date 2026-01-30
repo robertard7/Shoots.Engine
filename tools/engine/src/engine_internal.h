@@ -11,6 +11,8 @@
  * Forward declarations
  * ------------------------------------------------------------ */
 
+shoots_error_code_t shoots_validate_engine(shoots_engine_t *engine,
+                                           shoots_error_info_t *out_error);
 
 /* ------------------------------------------------------------
  * Engine / model / session state
@@ -52,6 +54,8 @@ typedef enum shoots_ledger_entry_type {
   SHOOTS_LEDGER_ENTRY_RESULT     = 3,
   SHOOTS_LEDGER_ENTRY_ERROR      = 4
 } shoots_ledger_entry_type_t;
+
+#define SHOOTS_LEDGER_MAX_BYTES 16384u
 
 /* ------------------------------------------------------------
  * Tools
