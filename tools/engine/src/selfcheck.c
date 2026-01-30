@@ -129,6 +129,24 @@ void selfcheck_run(shoots_engine_t *engine) {
     }
     ledger_check = ledger_check->next;
   }
+  assert(engine->provider_count <= SHOOTS_ENGINE_MAX_PROVIDERS);
+  assert(engine->providers_locked <= 1);
+  for (size_t index = 0; index < engine->provider_count; index++) {
+    const shoots_provider_descriptor_t *provider = &engine->providers[index];
+    shoots_error_info_t error_info;
+    assert(shoots_provider_descriptor_validate(provider, &error_info) == SHOOTS_OK);
+    for (size_t check = index + 1; check < engine->provider_count; check++) {
+      const shoots_provider_descriptor_t *other = &engine->providers[check];
+      assert(provider->provider_id_len != other->provider_id_len ||
+             memcmp(provider->provider_id, other->provider_id,
+                    provider->provider_id_len) != 0);
+    }
+  }
+  if (engine->provider_runtime != NULL) {
+    assert(shoots_provider_runtime_validate_ready(engine->provider_runtime, NULL) == SHOOTS_OK);
+  } else {
+    assert(engine->state != SHOOTS_ENGINE_STATE_INITIALIZED);
+  }
   shoots_session_t *session = engine->sessions_head;
   while (session != NULL) {
     if (session->has_terminal_execution) {
@@ -143,6 +161,37 @@ void selfcheck_run(shoots_engine_t *engine) {
       }
     }
     session = session->next;
+  }
+  shoots_provider_request_record_t *provider_request = engine->provider_requests_head;
+  uint64_t last_request_id = 0;
+  while (provider_request != NULL) {
+    if (last_request_id != 0) {
+      assert(provider_request->request_id >= last_request_id);
+    }
+    last_request_id = provider_request->request_id;
+    if (provider_request->received) {
+      shoots_result_record_t *result_match = engine->results_head;
+      int result_found = 0;
+      while (result_match != NULL) {
+        if (result_match->session_id == provider_request->session_id &&
+            result_match->execution_slot == provider_request->execution_slot) {
+          result_found = 1;
+          break;
+        }
+        result_match = result_match->next;
+      }
+      assert(result_found);
+      shoots_session_t *session_match = engine->sessions_head;
+      while (session_match != NULL &&
+             session_match->session_id != provider_request->session_id) {
+        session_match = session_match->next;
+      }
+      assert(session_match != NULL);
+      if (session_match->has_terminal_execution) {
+        assert(provider_request->execution_slot <= session_match->terminal_execution_slot);
+      }
+    }
+    provider_request = provider_request->next;
   }
 
   shoots_command_record_t *command = engine->commands_head;
@@ -210,6 +259,23 @@ void selfcheck_run(shoots_engine_t *engine) {
       check = check->next;
     }
     result = result->next;
+  }
+  shoots_session_t *terminal_session = engine->sessions_head;
+  while (terminal_session != NULL) {
+    if (terminal_session->has_terminal_execution) {
+      shoots_result_record_t *result_match = engine->results_head;
+      int terminal_found = 0;
+      while (result_match != NULL) {
+        if (result_match->session_id == terminal_session->session_id &&
+            result_match->execution_slot == terminal_session->terminal_execution_slot) {
+          terminal_found = 1;
+          break;
+        }
+        result_match = result_match->next;
+      }
+      assert(terminal_found);
+    }
+    terminal_session = terminal_session->next;
   }
 
   shoots_ledger_entry_t *ledger = engine->ledger_head;

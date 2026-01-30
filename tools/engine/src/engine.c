@@ -189,6 +189,24 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
   assert(engine->tools_locked <= 1);
   assert(engine->provider_count <= SHOOTS_ENGINE_MAX_PROVIDERS);
   assert(engine->providers_locked <= 1);
+  for (size_t index = 0; index < engine->provider_count; index++) {
+    const shoots_provider_descriptor_t *provider = &engine->providers[index];
+    assert(provider->provider_id_len > 0);
+    assert(provider->provider_id_len < SHOOTS_PROVIDER_ID_MAX);
+    assert(strnlen(provider->provider_id, SHOOTS_PROVIDER_ID_MAX) ==
+           provider->provider_id_len);
+    assert(provider->provider_id[provider->provider_id_len] == '\0');
+    for (size_t check = index + 1; check < engine->provider_count; check++) {
+      const shoots_provider_descriptor_t *other = &engine->providers[check];
+      assert(provider->provider_id_len != other->provider_id_len ||
+             memcmp(provider->provider_id, other->provider_id,
+                    provider->provider_id_len) != 0);
+    }
+  }
+  for (size_t index = engine->provider_count; index < SHOOTS_ENGINE_MAX_PROVIDERS; index++) {
+    assert(engine->providers[index].provider_id_len == 0);
+    assert(engine->providers[index].provider_id[0] == '\0');
+  }
   if (engine->results_head == NULL) {
     assert(engine->results_tail == NULL);
   } else {
@@ -200,6 +218,16 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
   } else {
     assert(engine->provider_requests_tail != NULL);
     assert(engine->provider_requests_tail->next == NULL);
+  }
+  shoots_provider_request_record_t *provider_request = engine->provider_requests_head;
+  uint64_t last_request_id = 0;
+  while (provider_request != NULL) {
+    assert(provider_request->request_id != 0);
+    if (last_request_id != 0) {
+      assert(provider_request->request_id >= last_request_id);
+    }
+    last_request_id = provider_request->request_id;
+    provider_request = provider_request->next;
   }
   shoots_command_record_t *command_cursor = engine->commands_head;
   uint64_t last_command_seq = 0;

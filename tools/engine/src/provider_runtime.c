@@ -470,6 +470,10 @@ shoots_error_code_t shoots_provider_runtime_validate_ready(
   }
 #ifndef NDEBUG
   shoots_provider_runtime_assert_invariants(runtime);
+  assert(runtime->state == SHOOTS_PROVIDER_RUNTIME_STATE_READY);
+  assert(runtime->effective_allow_background_threads == 0);
+  assert(runtime->effective_allow_filesystem_io == 0);
+  assert(runtime->effective_allow_network_io == 0);
 #endif
   return SHOOTS_OK;
 }
