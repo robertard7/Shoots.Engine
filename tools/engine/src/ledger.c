@@ -17,3 +17,12 @@ shoots_error_code_t ledger_query_type(
   shoots_error_info_t *out_error) {
   return shoots_ledger_query_type_internal(engine, type, out_entries, out_count, out_error);
 }
+
+shoots_error_code_t ledger_provider_snapshot(
+  shoots_engine_t *engine,
+  char **out_snapshot,
+  size_t *out_length,
+  shoots_error_info_t *out_error) {
+  return shoots_provider_snapshot_export_internal(
+      engine, out_snapshot, out_length, out_error);
+}

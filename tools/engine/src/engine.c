@@ -1107,6 +1107,208 @@ static uint64_t shoots_request_hash_update(uint64_t hash,
   return hash;
 }
 
+static uint64_t shoots_provider_registry_digest(const shoots_engine_t *engine) {
+  uint64_t hash = 14695981039346656037ull;
+  if (engine == NULL) {
+    return hash;
+  }
+  for (size_t index = 0; index < engine->provider_count; index++) {
+    const shoots_provider_descriptor_t *provider = &engine->providers[index];
+    hash = shoots_request_hash_update(hash, &provider->provider_id_len,
+                                      sizeof(provider->provider_id_len));
+    hash = shoots_request_hash_update(hash, provider->provider_id,
+                                      provider->provider_id_len);
+    hash = shoots_request_hash_update(hash, &provider->supported_tool_categories,
+                                      sizeof(provider->supported_tool_categories));
+    hash = shoots_request_hash_update(hash, &provider->max_concurrency,
+                                      sizeof(provider->max_concurrency));
+    hash = shoots_request_hash_update(hash, &provider->guarantees_mask,
+                                      sizeof(provider->guarantees_mask));
+  }
+  return hash;
+}
+
+static int shoots_provider_request_record_compare(const void *left, const void *right) {
+  const shoots_provider_request_record_t *first =
+      *(const shoots_provider_request_record_t *const *)left;
+  const shoots_provider_request_record_t *second =
+      *(const shoots_provider_request_record_t *const *)right;
+  if (first->request_id < second->request_id) {
+    return -1;
+  }
+  if (first->request_id > second->request_id) {
+    return 1;
+  }
+  if (first->session_id < second->session_id) {
+    return -1;
+  }
+  if (first->session_id > second->session_id) {
+    return 1;
+  }
+  if (first->plan_id < second->plan_id) {
+    return -1;
+  }
+  if (first->plan_id > second->plan_id) {
+    return 1;
+  }
+  if (first->execution_slot < second->execution_slot) {
+    return -1;
+  }
+  if (first->execution_slot > second->execution_slot) {
+    return 1;
+  }
+  if (first->provider_id_len < second->provider_id_len) {
+    return -1;
+  }
+  if (first->provider_id_len > second->provider_id_len) {
+    return 1;
+  }
+  if (first->provider_id_len > 0) {
+    int provider_cmp = memcmp(first->provider_id, second->provider_id,
+                              first->provider_id_len);
+    if (provider_cmp != 0) {
+      return provider_cmp;
+    }
+  }
+  if (first->tool_id_len < second->tool_id_len) {
+    return -1;
+  }
+  if (first->tool_id_len > second->tool_id_len) {
+    return 1;
+  }
+  if (first->tool_id_len > 0) {
+    int tool_cmp = memcmp(first->tool_id, second->tool_id, first->tool_id_len);
+    if (tool_cmp != 0) {
+      return tool_cmp;
+    }
+  }
+  if (first->tool_version < second->tool_version) {
+    return -1;
+  }
+  if (first->tool_version > second->tool_version) {
+    return 1;
+  }
+  if (first->capability_mask < second->capability_mask) {
+    return -1;
+  }
+  if (first->capability_mask > second->capability_mask) {
+    return 1;
+  }
+  if (first->input_hash < second->input_hash) {
+    return -1;
+  }
+  if (first->input_hash > second->input_hash) {
+    return 1;
+  }
+  if (first->arg_size < second->arg_size) {
+    return -1;
+  }
+  if (first->arg_size > second->arg_size) {
+    return 1;
+  }
+  if (first->arg_size > 0) {
+    int arg_cmp = memcmp(first->arg_blob, second->arg_blob, first->arg_size);
+    if (arg_cmp != 0) {
+      return arg_cmp;
+    }
+  }
+  if (first->received < second->received) {
+    return -1;
+  }
+  if (first->received > second->received) {
+    return 1;
+  }
+  return 0;
+}
+
+static int shoots_result_is_provider_terminal(const shoots_result_record_t *result) {
+  const char *prefix = "provider_request=";
+  size_t prefix_len = strlen(prefix);
+  if (result == NULL || result->command_id == NULL) {
+    return 0;
+  }
+  return strncmp(result->command_id, prefix, prefix_len) == 0;
+}
+
+static int shoots_provider_result_compare(const void *left, const void *right) {
+  const shoots_result_record_t *first = *(const shoots_result_record_t *const *)left;
+  const shoots_result_record_t *second = *(const shoots_result_record_t *const *)right;
+  if (first->session_id < second->session_id) {
+    return -1;
+  }
+  if (first->session_id > second->session_id) {
+    return 1;
+  }
+  if (first->execution_slot < second->execution_slot) {
+    return -1;
+  }
+  if (first->execution_slot > second->execution_slot) {
+    return 1;
+  }
+  if (first->command_id == NULL && second->command_id != NULL) {
+    return -1;
+  }
+  if (first->command_id != NULL && second->command_id == NULL) {
+    return 1;
+  }
+  if (first->command_id != NULL && second->command_id != NULL) {
+    int command_cmp = strcmp(first->command_id, second->command_id);
+    if (command_cmp != 0) {
+      return command_cmp;
+    }
+  }
+  if (first->ledger_entry_id < second->ledger_entry_id) {
+    return -1;
+  }
+  if (first->ledger_entry_id > second->ledger_entry_id) {
+    return 1;
+  }
+  if (first->status < second->status) {
+    return -1;
+  }
+  if (first->status > second->status) {
+    return 1;
+  }
+  if (first->payload_len < second->payload_len) {
+    return -1;
+  }
+  if (first->payload_len > second->payload_len) {
+    return 1;
+  }
+  if (first->payload != NULL && second->payload != NULL && first->payload_len > 0) {
+    int payload_cmp = memcmp(first->payload, second->payload, first->payload_len);
+    if (payload_cmp != 0) {
+      return payload_cmp;
+    }
+  }
+  return 0;
+}
+
+static shoots_error_code_t shoots_snapshot_add_size(
+  size_t *total,
+  size_t add,
+  shoots_error_info_t *out_error) {
+  if (add > SIZE_MAX - *total) {
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot size overflow");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  *total += add;
+  return SHOOTS_OK;
+}
+
+static void shoots_snapshot_write_hex(char *buffer,
+                                      size_t offset,
+                                      const uint8_t *bytes,
+                                      size_t length) {
+  static const char hex_digits[] = "0123456789abcdef";
+  for (size_t index = 0; index < length; index++) {
+    uint8_t value = bytes[index];
+    buffer[offset + index * 2] = hex_digits[(value >> 4) & 0x0f];
+    buffer[offset + index * 2 + 1] = hex_digits[value & 0x0f];
+  }
+}
+
 static uint64_t shoots_provider_request_id(
   uint64_t session_id,
   uint64_t plan_id,
@@ -2495,6 +2697,363 @@ shoots_error_code_t shoots_ledger_query_substring_internal(
   }
   *out_entries = entries;
   *out_count = match_count;
+  return SHOOTS_OK;
+}
+
+shoots_error_code_t shoots_provider_snapshot_export_internal(
+  shoots_engine_t *engine,
+  char **out_snapshot,
+  size_t *out_length,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_snapshot == NULL || out_length == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "output is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_snapshot = NULL;
+  *out_length = 0;
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  uint64_t registry_digest = shoots_provider_registry_digest(engine);
+
+  size_t request_count = 0;
+  shoots_provider_request_record_t *request_cursor = engine->provider_requests_head;
+  while (request_cursor != NULL) {
+    request_count++;
+    request_cursor = request_cursor->next;
+  }
+  shoots_provider_request_record_t **request_records = NULL;
+  if (request_count > 0) {
+    request_records = (shoots_provider_request_record_t **)shoots_engine_alloc_internal(
+        engine, request_count * sizeof(*request_records), out_error);
+    if (request_records == NULL) {
+      return SHOOTS_ERR_OUT_OF_MEMORY;
+    }
+    size_t index = 0;
+    request_cursor = engine->provider_requests_head;
+    while (request_cursor != NULL) {
+      request_records[index] = request_cursor;
+      index++;
+      request_cursor = request_cursor->next;
+    }
+    qsort(request_records, request_count, sizeof(*request_records),
+          shoots_provider_request_record_compare);
+  }
+
+  size_t result_count = 0;
+  shoots_result_record_t *result_cursor = engine->results_head;
+  while (result_cursor != NULL) {
+    if (shoots_result_is_provider_terminal(result_cursor)) {
+      result_count++;
+    }
+    result_cursor = result_cursor->next;
+  }
+  shoots_result_record_t **result_records = NULL;
+  if (result_count > 0) {
+    result_records = (shoots_result_record_t **)shoots_engine_alloc_internal(
+        engine, result_count * sizeof(*result_records), out_error);
+    if (result_records == NULL) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      return SHOOTS_ERR_OUT_OF_MEMORY;
+    }
+    size_t index = 0;
+    result_cursor = engine->results_head;
+    while (result_cursor != NULL) {
+      if (shoots_result_is_provider_terminal(result_cursor)) {
+        result_records[index] = result_cursor;
+        index++;
+      }
+      result_cursor = result_cursor->next;
+    }
+    qsort(result_records, result_count, sizeof(*result_records),
+          shoots_provider_result_compare);
+  }
+
+  size_t total_len = 0;
+  int header_len = snprintf(NULL, 0,
+                            "provider_registry count=%zu digest=0x%016" PRIx64 "\n",
+                            engine->provider_count, registry_digest);
+  if (header_len < 0) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  shoots_error_code_t size_status =
+      shoots_snapshot_add_size(&total_len, (size_t)header_len, out_error);
+  if (size_status != SHOOTS_OK) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    return size_status;
+  }
+  for (size_t index = 0; index < engine->provider_count; index++) {
+    const shoots_provider_descriptor_t *provider = &engine->providers[index];
+    int line_len = snprintf(NULL, 0,
+                            "provider[%zu] provider_id=%.*s categories=0x%08" PRIx32
+                            " max_concurrency=%" PRIu32 " guarantees=0x%08" PRIx32 "\n",
+                            index,
+                            (int)provider->provider_id_len,
+                            provider->provider_id,
+                            provider->supported_tool_categories,
+                            provider->max_concurrency,
+                            provider->guarantees_mask);
+    if (line_len < 0) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                       "snapshot format failed");
+      return SHOOTS_ERR_INVALID_STATE;
+    }
+    size_status = shoots_snapshot_add_size(&total_len, (size_t)line_len, out_error);
+    if (size_status != SHOOTS_OK) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      return size_status;
+    }
+  }
+  int request_header_len = snprintf(NULL, 0, "provider_requests count=%zu\n",
+                                    request_count);
+  if (request_header_len < 0) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  size_status = shoots_snapshot_add_size(&total_len,
+                                         (size_t)request_header_len,
+                                         out_error);
+  if (size_status != SHOOTS_OK) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    return size_status;
+  }
+  for (size_t index = 0; index < request_count; index++) {
+    const shoots_provider_request_record_t *record = request_records[index];
+    int prefix_len = snprintf(NULL, 0,
+                              "request[%zu] session_id=%" PRIu64
+                              " plan_id=%" PRIu64 " execution_slot=%" PRIu64
+                              " request_id=0x%016" PRIx64
+                              " provider_id=%.*s tool_id=%.*s tool_version=%" PRIu32
+                              " capability_mask=0x%016" PRIx64
+                              " input_hash=0x%016" PRIx64
+                              " arg_size=%" PRIu32 " arg_hex=",
+                              index,
+                              record->session_id,
+                              record->plan_id,
+                              record->execution_slot,
+                              record->request_id,
+                              (int)record->provider_id_len,
+                              record->provider_id,
+                              (int)record->tool_id_len,
+                              record->tool_id,
+                              record->tool_version,
+                              record->capability_mask,
+                              record->input_hash,
+                              record->arg_size);
+    if (prefix_len < 0) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                       "snapshot format failed");
+      return SHOOTS_ERR_INVALID_STATE;
+    }
+    size_t line_len = (size_t)prefix_len + (size_t)record->arg_size * 2u + 1u;
+    size_status = shoots_snapshot_add_size(&total_len, line_len, out_error);
+    if (size_status != SHOOTS_OK) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      return size_status;
+    }
+  }
+  int result_header_len = snprintf(NULL, 0, "provider_results count=%zu\n",
+                                   result_count);
+  if (result_header_len < 0) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  size_status = shoots_snapshot_add_size(&total_len, (size_t)result_header_len, out_error);
+  if (size_status != SHOOTS_OK) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    return size_status;
+  }
+  for (size_t index = 0; index < result_count; index++) {
+    const shoots_result_record_t *result = result_records[index];
+    const char *command_id = result->command_id != NULL ? result->command_id : "";
+    const char *payload = result->payload != NULL ? result->payload : "";
+    int line_len = snprintf(NULL, 0,
+                            "result[%zu] session_id=%" PRIu64
+                            " execution_slot=%" PRIu64
+                            " ledger_entry_id=%" PRIu64
+                            " command_id=%s status=%d payload=%s\n",
+                            index,
+                            result->session_id,
+                            result->execution_slot,
+                            result->ledger_entry_id,
+                            command_id,
+                            result->status,
+                            payload);
+    if (line_len < 0) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                       "snapshot format failed");
+      return SHOOTS_ERR_INVALID_STATE;
+    }
+    size_status = shoots_snapshot_add_size(&total_len, (size_t)line_len, out_error);
+    if (size_status != SHOOTS_OK) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      return size_status;
+    }
+  }
+  if (total_len > SIZE_MAX - 1) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot size overflow");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  char *buffer = (char *)shoots_engine_alloc_internal(engine, total_len + 1, out_error);
+  if (buffer == NULL) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  size_t offset = 0;
+  int written = snprintf(buffer + offset, total_len + 1 - offset,
+                         "provider_registry count=%zu digest=0x%016" PRIx64 "\n",
+                         engine->provider_count, registry_digest);
+  if (written < 0) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    shoots_engine_alloc_free_internal(engine, buffer);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  offset += (size_t)written;
+  for (size_t index = 0; index < engine->provider_count; index++) {
+    const shoots_provider_descriptor_t *provider = &engine->providers[index];
+    written = snprintf(buffer + offset, total_len + 1 - offset,
+                       "provider[%zu] provider_id=%.*s categories=0x%08" PRIx32
+                       " max_concurrency=%" PRIu32 " guarantees=0x%08" PRIx32 "\n",
+                       index,
+                       (int)provider->provider_id_len,
+                       provider->provider_id,
+                       provider->supported_tool_categories,
+                       provider->max_concurrency,
+                       provider->guarantees_mask);
+    if (written < 0) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      shoots_engine_alloc_free_internal(engine, buffer);
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                       "snapshot format failed");
+      return SHOOTS_ERR_INVALID_STATE;
+    }
+    offset += (size_t)written;
+  }
+  written = snprintf(buffer + offset, total_len + 1 - offset,
+                     "provider_requests count=%zu\n", request_count);
+  if (written < 0) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    shoots_engine_alloc_free_internal(engine, buffer);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  offset += (size_t)written;
+  for (size_t index = 0; index < request_count; index++) {
+    const shoots_provider_request_record_t *record = request_records[index];
+    written = snprintf(buffer + offset, total_len + 1 - offset,
+                       "request[%zu] session_id=%" PRIu64
+                       " plan_id=%" PRIu64 " execution_slot=%" PRIu64
+                       " request_id=0x%016" PRIx64
+                       " provider_id=%.*s tool_id=%.*s tool_version=%" PRIu32
+                       " capability_mask=0x%016" PRIx64
+                       " input_hash=0x%016" PRIx64
+                       " arg_size=%" PRIu32 " arg_hex=",
+                       index,
+                       record->session_id,
+                       record->plan_id,
+                       record->execution_slot,
+                       record->request_id,
+                       (int)record->provider_id_len,
+                       record->provider_id,
+                       (int)record->tool_id_len,
+                       record->tool_id,
+                       record->tool_version,
+                       record->capability_mask,
+                       record->input_hash,
+                       record->arg_size);
+    if (written < 0) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      shoots_engine_alloc_free_internal(engine, buffer);
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                       "snapshot format failed");
+      return SHOOTS_ERR_INVALID_STATE;
+    }
+    offset += (size_t)written;
+    if (record->arg_size > 0) {
+      shoots_snapshot_write_hex(buffer, offset, record->arg_blob, record->arg_size);
+      offset += (size_t)record->arg_size * 2u;
+    }
+    buffer[offset] = '\n';
+    offset += 1;
+  }
+  written = snprintf(buffer + offset, total_len + 1 - offset,
+                     "provider_results count=%zu\n", result_count);
+  if (written < 0) {
+    shoots_engine_alloc_free_internal(engine, request_records);
+    shoots_engine_alloc_free_internal(engine, result_records);
+    shoots_engine_alloc_free_internal(engine, buffer);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "snapshot format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  offset += (size_t)written;
+  for (size_t index = 0; index < result_count; index++) {
+    const shoots_result_record_t *result = result_records[index];
+    const char *command_id = result->command_id != NULL ? result->command_id : "";
+    const char *payload = result->payload != NULL ? result->payload : "";
+    written = snprintf(buffer + offset, total_len + 1 - offset,
+                       "result[%zu] session_id=%" PRIu64
+                       " execution_slot=%" PRIu64
+                       " ledger_entry_id=%" PRIu64
+                       " command_id=%s status=%d payload=%s\n",
+                       index,
+                       result->session_id,
+                       result->execution_slot,
+                       result->ledger_entry_id,
+                       command_id,
+                       result->status,
+                       payload);
+    if (written < 0) {
+      shoots_engine_alloc_free_internal(engine, request_records);
+      shoots_engine_alloc_free_internal(engine, result_records);
+      shoots_engine_alloc_free_internal(engine, buffer);
+      shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                       "snapshot format failed");
+      return SHOOTS_ERR_INVALID_STATE;
+    }
+    offset += (size_t)written;
+  }
+  buffer[offset] = '\0';
+  shoots_engine_alloc_free_internal(engine, request_records);
+  shoots_engine_alloc_free_internal(engine, result_records);
+  *out_snapshot = buffer;
+  *out_length = total_len;
   return SHOOTS_OK;
 }
 

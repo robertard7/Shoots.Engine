@@ -452,6 +452,12 @@ shoots_error_code_t shoots_ledger_query_substring_internal(
   size_t *out_count,
   shoots_error_info_t *out_error);
 
+shoots_error_code_t shoots_provider_snapshot_export_internal(
+  shoots_engine_t *engine,
+  char **out_snapshot,
+  size_t *out_length,
+  shoots_error_info_t *out_error);
+
 shoots_error_code_t shoots_command_append_internal(
   shoots_engine_t *engine,
   shoots_session_t *session,
