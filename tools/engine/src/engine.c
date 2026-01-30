@@ -3190,6 +3190,10 @@ shoots_error_code_t shoots_provider_request_mint_internal(
   record->tool_version = out_request->tool_version;
   record->capability_mask = capability_mask;
   record->input_hash = input_hash;
+  record->arg_size = arg_size;
+  if (arg_size > 0) {
+    memcpy(record->arg_blob, arg_blob, arg_size);
+  }
   record->received = 0;
   record->next = NULL;
 

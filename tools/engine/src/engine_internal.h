@@ -188,6 +188,8 @@ typedef struct shoots_provider_request_record {
   uint32_t tool_version;
   uint64_t capability_mask;
   uint64_t input_hash;
+  uint32_t arg_size;
+  uint8_t  arg_blob[SHOOTS_PROVIDER_ARG_MAX_BYTES];
   uint8_t  received;
   struct shoots_provider_request_record *next;
 } shoots_provider_request_record_t;
@@ -362,6 +364,12 @@ shoots_error_code_t shoots_provider_receipt_verify_internal(
 shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
   shoots_engine_t *engine,
   const shoots_provider_receipt_t *receipt,
+  shoots_error_info_t *out_error);
+
+shoots_error_code_t shoots_provider_requests_export_internal(
+  shoots_engine_t *engine,
+  shoots_provider_request_t **out_requests,
+  size_t *out_count,
   shoots_error_info_t *out_error);
 
 shoots_error_code_t shoots_session_create_internal(

@@ -386,6 +386,86 @@ shoots_error_code_t shoots_provider_runtime_validate_ready(
   return SHOOTS_OK;
 }
 
+shoots_error_code_t shoots_provider_requests_export_internal(
+  shoots_engine_t *engine,
+  shoots_provider_request_t **out_requests,
+  size_t *out_count,
+  shoots_error_info_t *out_error) {
+  shoots_error_clear(out_error);
+  if (out_requests == NULL || out_count == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "output is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  *out_requests = NULL;
+  *out_count = 0;
+  if (engine == NULL) {
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
+                     "engine is null");
+    return SHOOTS_ERR_INVALID_ARGUMENT;
+  }
+  shoots_error_code_t engine_status = shoots_validate_engine(engine, out_error);
+  if (engine_status != SHOOTS_OK) {
+    return engine_status;
+  }
+  size_t pending_count = 0;
+  shoots_provider_request_record_t *cursor = engine->provider_requests_head;
+  while (cursor != NULL) {
+    if (!cursor->received) {
+      pending_count++;
+    }
+    cursor = cursor->next;
+  }
+  if (pending_count == 0) {
+    return SHOOTS_OK;
+  }
+  if (pending_count > SIZE_MAX / sizeof(shoots_provider_request_t)) {
+    shoots_error_set(out_error, SHOOTS_ERR_OUT_OF_MEMORY, SHOOTS_SEVERITY_RECOVERABLE,
+                     "request export size overflow");
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  shoots_provider_request_t *requests =
+      (shoots_provider_request_t *)shoots_engine_alloc_internal(
+          engine, pending_count * sizeof(*requests), out_error);
+  if (requests == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  size_t index = 0;
+  cursor = engine->provider_requests_head;
+  while (cursor != NULL) {
+    if (!cursor->received) {
+      if (cursor->arg_size > SHOOTS_PROVIDER_ARG_MAX_BYTES) {
+        shoots_engine_alloc_free_internal(engine, requests);
+        shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                         "request arg size invalid");
+        return SHOOTS_ERR_INVALID_STATE;
+      }
+      shoots_provider_request_t *request = &requests[index];
+      memset(request, 0, sizeof(*request));
+      request->session_id = cursor->session_id;
+      request->plan_id = cursor->plan_id;
+      request->execution_slot = cursor->execution_slot;
+      request->request_id = cursor->request_id;
+      request->provider_id_len = cursor->provider_id_len;
+      memcpy(request->provider_id, cursor->provider_id, cursor->provider_id_len + 1);
+      request->tool_id_len = cursor->tool_id_len;
+      memcpy(request->tool_id, cursor->tool_id, cursor->tool_id_len + 1);
+      request->tool_version = cursor->tool_version;
+      request->capability_mask = cursor->capability_mask;
+      request->input_hash = cursor->input_hash;
+      request->arg_size = cursor->arg_size;
+      if (cursor->arg_size > 0) {
+        memcpy(request->arg_blob, cursor->arg_blob, cursor->arg_size);
+      }
+      index++;
+    }
+    cursor = cursor->next;
+  }
+  *out_requests = requests;
+  *out_count = index;
+  return SHOOTS_OK;
+}
+
 shoots_error_code_t shoots_provider_descriptor_validate(
   const shoots_provider_descriptor_t *descriptor,
   shoots_error_info_t *out_error) {
