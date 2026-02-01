@@ -29,6 +29,7 @@ typedef struct shoots_alloc_header {
   struct shoots_alloc_header *next;
 } shoots_alloc_header_t;
 
+/* Helper prototypes kept before first use for MSVC strictness. */
 static shoots_session_t *shoots_find_session(shoots_engine_t *engine, uint64_t session_id);
 static int shoots_provider_request_record_compare(const void *left, const void *right);
 static int shoots_provider_result_compare(const void *left, const void *right);
