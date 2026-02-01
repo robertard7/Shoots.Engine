@@ -1,0 +1,12 @@
+diff --git a/.ai/patches/README.md b/.ai/patches/README.md
+index 5bf6aa4..adddfed 100644
+--- a/.ai/patches/README.md
++++ b/.ai/patches/README.md
+@@ -1,5 +1,5 @@
+ # Patch History
+ 
+-This directory intentionally contains no patch files.
++This directory stores transient patch artifacts for review.
+ 
+-Patch history is tracked outside the repository.
++Patch history is tracked outside the repository, and only current patches should remain here.
