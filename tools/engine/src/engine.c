@@ -18,7 +18,6 @@
 #define SHOOTS_SESSION_MAGIC_DESTROYED 0x53445353u
 #define SHOOTS_SESSION_CHAT_CAPACITY 4096u
 #define SHOOTS_LEDGER_MAX_ENTRIES 256u
-#define SHOOTS_LEDGER_MAX_BYTES 16384u
 #define SHOOTS_COMMAND_MAX_ENTRIES 256u
 #define SHOOTS_COMMAND_MAX_BYTES 16384u
 #define SHOOTS_RESULT_MAX_BYTES 4096u
@@ -30,7 +29,18 @@ typedef struct shoots_alloc_header {
   struct shoots_alloc_header *next;
 } shoots_alloc_header_t;
 
+/* Helper prototypes kept before first use for MSVC strictness. */
 static shoots_session_t *shoots_find_session(shoots_engine_t *engine, uint64_t session_id);
+static int shoots_provider_request_record_compare(const void *left, const void *right);
+static int shoots_provider_result_compare(const void *left, const void *right);
+static int shoots_result_is_provider_terminal(const shoots_result_record_t *result);
+static shoots_error_code_t shoots_snapshot_add_size(size_t *total,
+                                                    size_t add,
+                                                    shoots_error_info_t *out_error);
+static void shoots_snapshot_write_hex(char *buffer,
+                                      size_t offset,
+                                      const uint8_t *bytes,
+                                      size_t length);
 
 static void shoots_error_clear(shoots_error_info_t *out_error) {
   if (out_error == NULL) {
@@ -336,8 +346,8 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
 #endif
 }
 
-static shoots_error_code_t shoots_validate_engine(shoots_engine_t *engine,
-                                                  shoots_error_info_t *out_error) {
+shoots_error_code_t shoots_validate_engine(shoots_engine_t *engine,
+                                           shoots_error_info_t *out_error) {
   if (engine == NULL) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "engine is null");
@@ -556,15 +566,6 @@ static shoots_result_record_t *shoots_find_result_for_command(shoots_engine_t *e
     cursor = cursor->next;
   }
   return NULL;
-}
-  shoots_intent_record_t *cursor = engine->intents_head;
-  while (cursor != NULL) {
-    if (strcmp(cursor->intent_id, intent_id) == 0) {
-      return 1;
-    }
-    cursor = cursor->next;
-  }
-  return 0;
 }
 
 static uint64_t shoots_hash_tool_descriptor(const char *tool_id,
@@ -3708,6 +3709,32 @@ shoots_error_code_t shoots_tool_invoke_internal(
                      "ledger payload too large");
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
+  char *payload = (char *)shoots_engine_alloc_internal(
+      engine, payload_len + 1, out_error);
+  if (payload == NULL) {
+    return SHOOTS_ERR_OUT_OF_MEMORY;
+  }
+  int written = snprintf(payload, payload_len + 1,
+                         "tool_invoke tool_id=%s status=REJECT reason=%s",
+                         safe_tool_id, reason);
+  if (written < 0) {
+    shoots_engine_alloc_free_internal(engine, payload);
+    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
+                     "ledger format failed");
+    return SHOOTS_ERR_INVALID_STATE;
+  }
+  shoots_ledger_entry_t *entry = NULL;
+  shoots_error_code_t status = shoots_ledger_append_internal(
+      engine, SHOOTS_LEDGER_ENTRY_ERROR, payload, &entry, out_error);
+  shoots_engine_alloc_free_internal(engine, payload);
+  if (status != SHOOTS_OK) {
+    return status;
+  }
+  shoots_error_set(out_error, SHOOTS_ERR_UNSUPPORTED, SHOOTS_SEVERITY_RECOVERABLE,
+                   "tool invocation not implemented");
+  return SHOOTS_ERR_UNSUPPORTED;
+}
+
 shoots_error_code_t shoots_provider_request_mint_internal(
   shoots_engine_t *engine,
   shoots_session_t *session,
@@ -4447,32 +4474,6 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
   }
   shoots_assert_invariants(engine);
   return SHOOTS_OK;
-}
-
-  char *payload = (char *)shoots_engine_alloc_internal(
-      engine, payload_len + 1, out_error);
-  if (payload == NULL) {
-    return SHOOTS_ERR_OUT_OF_MEMORY;
-  }
-  int written = snprintf(payload, payload_len + 1,
-                         "tool_invoke tool_id=%s status=REJECT reason=%s",
-                         safe_tool_id, reason);
-  if (written < 0) {
-    shoots_engine_alloc_free_internal(engine, payload);
-    shoots_error_set(out_error, SHOOTS_ERR_INVALID_STATE, SHOOTS_SEVERITY_RECOVERABLE,
-                     "ledger format failed");
-    return SHOOTS_ERR_INVALID_STATE;
-  }
-  shoots_ledger_entry_t *entry = NULL;
-  shoots_error_code_t status = shoots_ledger_append_internal(
-      engine, SHOOTS_LEDGER_ENTRY_ERROR, payload, &entry, out_error);
-  shoots_engine_alloc_free_internal(engine, payload);
-  if (status != SHOOTS_OK) {
-    return status;
-  }
-  shoots_error_set(out_error, SHOOTS_ERR_UNSUPPORTED, SHOOTS_SEVERITY_RECOVERABLE,
-                   "tool invocation not implemented");
-  return SHOOTS_ERR_UNSUPPORTED;
 }
 
 shoots_error_code_t shoots_provider_receipt_import_internal(
