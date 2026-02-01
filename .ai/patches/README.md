@@ -1,5 +1,5 @@
 # Patch History
 
-This directory stores transient patch artifacts for review.
+This directory intentionally contains no patch files.
 
-Patch history is tracked outside the repository, and only current patches should remain here.
+Patch history is tracked outside the repository.
