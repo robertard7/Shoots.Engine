@@ -67,7 +67,7 @@ static int selfcheck_reason_code_valid(const char *code_text) {
          strcmp(code_text, "INVALID_DESCRIPTOR") == 0;
 }
 
-void selfcheck_run(shoots_engine_t *engine) {
+static void selfcheck_run(shoots_engine_t *engine) {
   if (engine == NULL) {
     return;
   }
