@@ -1,8 +1,8 @@
-#include "commands.h"
+#include "engine_internal.h"
 
 #include <string.h>
 
-void commands_add(shoots_engine_t *engine, const char *cmd) {
+static void commands_add(shoots_engine_t *engine, const char *cmd) {
     if (engine == NULL || cmd == NULL || cmd[0] == '\0') {
         return;
     }
@@ -23,7 +23,7 @@ void commands_add(shoots_engine_t *engine, const char *cmd) {
         &error_info);
 }
 
-size_t commands_last(shoots_engine_t *engine, char *buf, size_t bufsize) {
+static size_t commands_last(shoots_engine_t *engine, char *buf, size_t bufsize) {
     if (engine == NULL || buf == NULL || bufsize == 0) {
         return 0;
     }
