@@ -5,10 +5,8 @@ add_library(shoots_engine
     # These are your refactor modules. They currently don't conflict with engine.c
     # (different symbol names), and keeping them compiled lets Codex fill them in
     # without you fighting build wiring later.
-    src/core_engine.c
     src/session.c
     src/ledger.c
-    src/commands.c
     src/execution_spine.c
     src/tools.c
     src/planner.c
