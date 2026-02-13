@@ -1,13 +1,25 @@
 cmake_minimum_required(VERSION 3.20)
 
-add_library(shoots_engine_static STATIC
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  project(ShootsEngine C)
+endif()
+
+set(SHOOTS_ENGINE_SOURCES
   src/engine.c
   src/provider_runtime.c
+  src/session.c
+  src/ledger.c
+  src/execution_spine.c
+  src/commands.c
+  src/core_engine.c
+)
+
+add_library(shoots_engine_static STATIC
+  ${SHOOTS_ENGINE_SOURCES}
 )
 
 add_library(shoots_engine_shared SHARED
-  src/engine.c
-  src/provider_runtime.c
+  ${SHOOTS_ENGINE_SOURCES}
 )
 
 set_target_properties(shoots_engine_static PROPERTIES
