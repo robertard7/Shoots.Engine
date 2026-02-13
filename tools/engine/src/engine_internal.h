@@ -472,24 +472,6 @@ shoots_error_code_t shoots_provider_snapshot_export_internal(
   shoots_provider_snapshot_t **out_snapshot,
   shoots_error_info_t *out_error);
 
-/* BUILDER-ONLY */
-/* READ-ONLY */
-/* FROZEN API — DO NOT EXTEND WITHOUT PHASE BUMP */
-shoots_error_code_t shoots_engine_export_provider_snapshot_const(
-  const shoots_engine_t *engine,
-  shoots_provider_snapshot_t **out_snapshot,
-  shoots_error_info_t *out_error);
-
-shoots_error_code_t shoots_engine_export_pending_provider_requests_const(
-  const shoots_engine_t *engine,
-  shoots_provider_request_record_t **out_list,
-  size_t *out_count,
-  shoots_error_info_t *out_error);
-
-int shoots_engine_provider_ready(const shoots_engine_t *engine);
-
-/* END BUILDER-ONLY FROZEN PROVIDER QUERIES */
-
 shoots_error_code_t shoots_command_append_internal(
   shoots_engine_t *engine,
   shoots_session_t *session,
