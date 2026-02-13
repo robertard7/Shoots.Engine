@@ -42,6 +42,17 @@ static void shoots_snapshot_write_hex(char *buffer,
                                       const uint8_t *bytes,
                                       size_t length);
 
+static size_t shoots_strnlen_internal(const char *text, size_t max_len) {
+  size_t len = 0;
+  if (text == NULL) {
+    return 0;
+  }
+  while (len < max_len && text[len] != '\0') {
+    len++;
+  }
+  return len;
+}
+
 static void shoots_error_clear(shoots_error_info_t *out_error) {
   if (out_error == NULL) {
     return;
@@ -213,7 +224,7 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     const shoots_provider_descriptor_t *provider = &engine->providers[index];
     assert(provider->provider_id_len > 0);
     assert(provider->provider_id_len < SHOOTS_PROVIDER_ID_MAX);
-    assert(strnlen(provider->provider_id, SHOOTS_PROVIDER_ID_MAX) ==
+    assert(shoots_strnlen_internal(provider->provider_id, SHOOTS_PROVIDER_ID_MAX) ==
            provider->provider_id_len);
     assert(provider->provider_id[provider->provider_id_len] == '\0');
     for (size_t check = index + 1; check < engine->provider_count; check++) {
@@ -1818,7 +1829,7 @@ static uint64_t shoots_plan_hash(const char *intent_id,
     }
     uint32_t reason_code = (uint32_t)reason->code;
     hash = shoots_plan_hash_update(hash, &reason_code, sizeof(reason_code));
-    size_t token_len = strnlen(reason->token, sizeof(reason->token));
+    size_t token_len = shoots_strnlen_internal(reason->token, sizeof(reason->token));
     if (token_len > 0) {
       hash = shoots_plan_hash_update(hash, reason->token, token_len);
     }
@@ -1837,7 +1848,7 @@ static shoots_error_code_t shoots_plan_append_entry(
     const char *tool_id = response->ordered_tool_ids[index];
     const shoots_tool_reject_reason_t *reason = &response->rejection_reasons[index];
     const char *code_text = shoots_tool_reject_code_text(reason->code);
-    size_t token_len = strnlen(reason->token, sizeof(reason->token));
+    size_t token_len = shoots_strnlen_internal(reason->token, sizeof(reason->token));
     payload_len += strlen(" ") + strlen(tool_id) +
                    strlen(":code=") + strlen(code_text) +
                    strlen(" token=") + token_len;
@@ -1863,7 +1874,7 @@ static shoots_error_code_t shoots_plan_append_entry(
     const char *tool_id = response->ordered_tool_ids[index];
     const shoots_tool_reject_reason_t *reason = &response->rejection_reasons[index];
     const char *code_text = shoots_tool_reject_code_text(reason->code);
-    size_t token_len = strnlen(reason->token, sizeof(reason->token));
+    size_t token_len = shoots_strnlen_internal(reason->token, sizeof(reason->token));
     memcpy(payload + offset, " ", 1);
     offset += 1;
     memcpy(payload + offset, tool_id, strlen(tool_id));
@@ -4086,7 +4097,7 @@ shoots_error_code_t shoots_provider_receipt_verify_internal(
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   size_t provider_id_len =
-      strnlen(receipt->provider_id, SHOOTS_PROVIDER_ID_MAX);
+      shoots_strnlen_internal(receipt->provider_id, SHOOTS_PROVIDER_ID_MAX);
   if (provider_id_len != receipt->provider_id_len) {
     shoots_provider_receipt_append_decision(
         engine, provider_id_value, tool_id_value, receipt->plan_id,
@@ -4107,7 +4118,7 @@ shoots_error_code_t shoots_provider_receipt_verify_internal(
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   size_t tool_id_len =
-      strnlen(receipt->tool_id, SHOOTS_PROVIDER_TOOL_ID_MAX);
+      shoots_strnlen_internal(receipt->tool_id, SHOOTS_PROVIDER_TOOL_ID_MAX);
   if (tool_id_len != receipt->tool_id_len) {
     shoots_provider_receipt_append_decision(
         engine, provider_id_value, tool_id_value, receipt->plan_id,
