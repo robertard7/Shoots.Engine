@@ -1,6 +1,5 @@
-/*
- * Intentionally symbol-free translation unit.
- *
- * Core engine lifecycle behavior is implemented in engine.c authoritative
- * entrypoints.
- */
+#include "engine_internal.h"
+
+/* Intentionally compiled placeholder TU. Must not export symbols. */
+static const int shoots_core_engine_tu_anchor = 0;
+
