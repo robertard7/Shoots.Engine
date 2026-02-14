@@ -11,6 +11,14 @@ extern "C" {
 typedef struct shoots_engine shoots_engine_t;
 typedef struct shoots_model shoots_model_t;
 
+
+#define SHOOTS_ENGINE_ABI_VERSION_MAJOR 1u
+#define SHOOTS_ENGINE_ABI_VERSION_MINOR 0u
+#define SHOOTS_ENGINE_ABI_VERSION_PATCH 0u
+#define SHOOTS_ENGINE_ABI_VERSION ((SHOOTS_ENGINE_ABI_VERSION_MAJOR * 10000u) + \
+                                   (SHOOTS_ENGINE_ABI_VERSION_MINOR * 100u) + \
+                                   SHOOTS_ENGINE_ABI_VERSION_PATCH)
+
 typedef enum shoots_error_code {
   SHOOTS_OK = 0,
   SHOOTS_ERR_INVALID_ARGUMENT = 1,
