@@ -11,6 +11,10 @@
  * Forward declarations
  * ------------------------------------------------------------ */
 
+typedef struct shoots_session shoots_session_t;
+typedef struct shoots_ledger_entry shoots_ledger_entry_t;
+typedef struct shoots_provider_request_record shoots_provider_request_record_t;
+
 shoots_error_code_t shoots_validate_engine(shoots_engine_t *engine,
                                            shoots_error_info_t *out_error);
 
@@ -180,7 +184,7 @@ typedef struct shoots_result_record {
   struct shoots_result_record *next;
 } shoots_result_record_t;
 
-typedef struct shoots_provider_request_record {
+struct shoots_provider_request_record {
   uint64_t request_id;
   uint64_t session_id;
   uint64_t plan_id;
@@ -196,7 +200,7 @@ typedef struct shoots_provider_request_record {
   uint8_t  arg_blob[SHOOTS_PROVIDER_ARG_MAX_BYTES];
   uint8_t  received;
   struct shoots_provider_request_record *next;
-} shoots_provider_request_record_t;
+};
 
 #define SHOOTS_SESSION_MAX_PLANS 4u
 #define SHOOTS_SESSION_PLAN_MAX_TOOLS 64u
@@ -467,24 +471,6 @@ shoots_error_code_t shoots_provider_snapshot_export_internal(
   shoots_engine_t *engine,
   shoots_provider_snapshot_t **out_snapshot,
   shoots_error_info_t *out_error);
-
-/* BUILDER-ONLY */
-/* READ-ONLY */
-/* FROZEN API — DO NOT EXTEND WITHOUT PHASE BUMP */
-shoots_error_code_t shoots_engine_export_provider_snapshot_const(
-  const shoots_engine_t *engine,
-  shoots_provider_snapshot_t **out_snapshot,
-  shoots_error_info_t *out_error);
-
-shoots_error_code_t shoots_engine_export_pending_provider_requests_const(
-  const shoots_engine_t *engine,
-  shoots_provider_request_record_t **out_list,
-  size_t *out_count,
-  shoots_error_info_t *out_error);
-
-int shoots_engine_provider_ready(const shoots_engine_t *engine);
-
-/* END BUILDER-ONLY FROZEN PROVIDER QUERIES */
 
 shoots_error_code_t shoots_command_append_internal(
   shoots_engine_t *engine,

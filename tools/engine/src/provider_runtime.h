@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 typedef struct shoots_provider_runtime shoots_provider_runtime_t;
+typedef struct shoots_provider_request_record shoots_provider_request_record_t;
 
 #define SHOOTS_PROVIDER_TOOL_ID_MAX 64u
 #define SHOOTS_PROVIDER_ARG_MAX_BYTES 4096u

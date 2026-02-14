@@ -578,6 +578,17 @@ shoots_error_code_t shoots_provider_requests_export_internal(
   return SHOOTS_OK;
 }
 
+static size_t shoots_strnlen_internal(const char *text, size_t max_len) {
+  size_t len = 0;
+  if (text == NULL) {
+    return 0;
+  }
+  while (len < max_len && text[len] != '\0') {
+    len++;
+  }
+  return len;
+}
+
 shoots_error_code_t shoots_provider_descriptor_validate(
   const shoots_provider_descriptor_t *descriptor,
   shoots_error_info_t *out_error) {
@@ -594,7 +605,7 @@ shoots_error_code_t shoots_provider_descriptor_validate(
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
   size_t provider_id_len =
-      strnlen(descriptor->provider_id, SHOOTS_PROVIDER_ID_MAX);
+      shoots_strnlen_internal(descriptor->provider_id, SHOOTS_PROVIDER_ID_MAX);
   if (provider_id_len != descriptor->provider_id_len) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "provider_id length mismatch");
@@ -786,7 +797,7 @@ shoots_error_code_t shoots_provider_unregister_internal(
                                           "invalid_provider_id", NULL);
     return SHOOTS_ERR_INVALID_ARGUMENT;
   }
-  size_t provider_id_len = strnlen(provider_id, SHOOTS_PROVIDER_ID_MAX);
+  size_t provider_id_len = shoots_strnlen_internal(provider_id, SHOOTS_PROVIDER_ID_MAX);
   if (provider_id_len == 0 || provider_id_len >= SHOOTS_PROVIDER_ID_MAX) {
     shoots_error_set(out_error, SHOOTS_ERR_INVALID_ARGUMENT, SHOOTS_SEVERITY_RECOVERABLE,
                      "provider_id invalid");
