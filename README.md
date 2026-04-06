@@ -1,110 +1,168 @@
 # Shoots.Engine
 
-Shoots.Engine is a **portable, embeddable AI runtime engine**.
+Shoots.Engine is a portable, embeddable AI execution core.
+
+It is the lowest-level component in the Shoots stack and is responsible for running models and producing deterministic outputs.
+
+Shoots.Engine does not orchestrate, does not expose public application contracts, and does not perform workflow logic.
+
+Think execution core, not system.
+
+Purpose
+
+Shoots.Engine exists to provide:
+
+A local model execution layer
+A deterministic inference runtime
+A portable AI core that can be embedded anywhere
 
 It is designed to be:
-- **Embedded directly inside applications**
-- **Optionally hosted as a local service**
-- **Shippable with operating systems and standalone programs**
-- **Deterministic, side-effect controlled, and infrastructure-grade**
 
-This repository contains the **engine only**.
-
----
-
-## Scope (Strict)
+Embedded directly into applications
+Hosted optionally by a runtime layer
+Shipped as part of operating systems or standalone software
+Fully usable without any Shoots-specific components
+Scope (Enforced)
 
 Shoots.Engine is responsible for:
-- Local model loading
-- Inference execution
-- Embedding generation
-- Memory and lifecycle control
-- Deterministic request/response behavior
 
-Shoots.Engine is **not**:
-- A UI
-- A chatbot product
-- An agent framework
-- A workflow/orchestration system
-- A build tool
-- A network service by default
+Local model loading and unloading
+Model registry access (local only, no auto-fetching)
+Inference execution (prompt → tokens/output)
+Embedding generation
+Session/context primitives (context windows, buffers)
+Memory and lifecycle control of model execution
+Deterministic request → response behavior
+Low-level runtime error reporting (engine-level failures only)
+Local backend adapters required to execute models
+Out of Scope (Non-Negotiable)
 
-Those responsibilities belong elsewhere.
+Shoots.Engine must NOT contain:
 
----
+UI code
+Chatbot/product behavior
+Agent logic or reasoning systems
+Workflow or orchestration logic
+Taskboards, lanes, or execution policy
+Provider ABI or request/response envelope definitions
+Queueing, polling, or lifecycle orchestration
+Network services in core
+Model downloading or remote fetching
+Implicit filesystem writes
+“Helpful” prompt modification or hidden behavior
 
-## Design Principles
+If it is not required to execute a model deterministically, it does not belong here.
 
-- **Library-first**: The engine must function fully when embedded.
-- **Deterministic**: Same inputs + same model = same outputs.
-- **Explicit control**: No hidden defaults, no magic behavior.
-- **No side effects by default**:  
-  - No networking  
-  - No background threads unless explicitly started  
-  - No filesystem writes unless explicitly requested
-- **Stable ABI**: Designed to be consumed from multiple languages.
+Design Principles
+1. Library-first
 
-Think **SQLite**, not a web service.
+Shoots.Engine must work fully when embedded into another system.
+No host is required for correct operation.
 
----
+2. Deterministic
 
-## Architecture Overview
+Given:
 
-The engine is structured in layers:
+the same model
+the same input
+the same parameters
 
-1. **Core Engine**
-   - Inference
-   - Embeddings
-   - Model execution
-   - Memory management
+The output must be reproducible.
 
-2. **Host Adapters (outside this repo or optional)**
-   - Embedded host (linked into an app)
-   - Daemon/service host (optional, thin wrapper)
+3. Explicit Control
+No hidden defaults
+No implicit behavior
+All execution parameters must be visible and controllable
+4. No Side Effects by Default
 
-3. **Consumers**
-   - Shoots (via a provider adapter)
-   - Standalone applications
-   - OS-level tooling
+Shoots.Engine does nothing unless explicitly told to:
 
-The core engine has **no knowledge of Shoots**.
+No networking
+No background threads unless explicitly started
+No filesystem writes unless explicitly requested
+5. Replaceable Backends
 
----
+The engine may support multiple local execution backends, but:
 
-## Relationship to Shoots
+Backend selection must be explicit
+No hidden fallback behavior
+No provider-specific logic inside the engine
+6. Stable Core Interface
 
-- Shoots consumes Shoots.Engine via a **native provider adapter**
-- Shoots performs orchestration, reasoning, confirmation, and UX
-- Shoots.Engine performs execution only
+Shoots.Engine exposes a stable interface for:
 
-Shoots.Engine must remain usable even if Shoots did not exist.
+model execution
+embeddings
+session/context control
 
----
+Higher-level contracts belong to Shoots.Provider.
 
-## Repository Rules (Non-Negotiable)
+Architecture Position
 
-- No Shoots UI code
-- No orchestration logic
-- No provider selection logic
-- No network servers in core
-- No auto-downloading of models
-- No implicit filesystem writes
-- No prompt “helpfulness” in the engine
+Shoots.Engine sits at the bottom of the stack:
 
-Violations of these rules are considered architectural bugs.
+Application / UI (RAMY, etc.)
+        ↓
+Shoots.Provider (ABI / contract)
+        ↓
+Shoots.Runtime (lifecycle / orchestration)
+        ↓
+Shoots.Engine (execution core)
+        ↓
+Local models
 
----
+Shoots.Engine does not know about any layer above it.
 
-## Validation & Execution Policy
+Relationship to Shoots
+Shoots.Provider consumes Shoots.Engine through a controlled adapter
+Shoots.Runtime may host and coordinate Engine execution
+Shoots (or RAMY) performs orchestration, reasoning, and UX
 
-This repository follows the **Codex Operating Policy**.
+Shoots.Engine performs execution only
 
-Key points:
-- Codex may only author patches
-- All builds and tests run in CI
-- No local execution by Codex
-- CI logs are the single source of truth
+Repository Rules (Strict)
 
-See:
-- [docs/codex-operating-policy.md](docs/codex-operating-policy.md)
-- [docs/GOALS.md](docs/GOALS.md)
+The following are considered architectural violations:
+
+Adding orchestration or workflow logic
+Adding provider-level contracts
+Adding UI or agent logic
+Introducing hidden behavior or side effects
+Coupling Engine to any specific application
+Validation Policy
+All changes must preserve deterministic behavior
+All model execution paths must be testable
+Failures must be explicit and structured
+No silent fallbacks
+
+Shoots.Engine must remain:
+
+predictable, portable, and controlled
+
+Guiding Principle
+
+Shoots.Engine is not smart.
+
+It does not decide what to do.
+
+It does not help.
+
+It does not adapt.
+
+It executes.
+
+Everything above it is responsible for intelligence.
+
+Mental Model
+
+Think:
+
+SQLite for AI execution
+
+Not:
+
+a service
+a chatbot
+a framework
+
+Just a reliable, embeddable execution core
