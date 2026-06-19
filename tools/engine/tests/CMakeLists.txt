@@ -92,6 +92,7 @@ add_engine_test_pair(multi_request_ordering multi_request_ordering_test.c)
 add_engine_test_pair(multi_session_isolation multi_session_isolation_test.c)
 add_engine_test_pair(snapshot_contract snapshot_contract_test.c)
 add_engine_test_pair(oom_guardrails oom_guardrails_test.c)
+add_engine_test_pair(public_execution_api public_execution_api_test.c)
 
 add_custom_target(engine_tests_all)
 add_dependencies(engine_tests_all
@@ -103,6 +104,7 @@ add_dependencies(engine_tests_all
   multi_session_isolation_static_test multi_session_isolation_shared_test
   snapshot_contract_static_test snapshot_contract_shared_test
   oom_guardrails_static_test oom_guardrails_shared_test
+  public_execution_api_static_test public_execution_api_shared_test
 )
 
 add_dependencies(headers_smoke shoots_engine_static)

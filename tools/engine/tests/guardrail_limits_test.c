@@ -1,6 +1,6 @@
 #include "engine_internal.h"
 
-#include <assert.h>
+#include "always_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
