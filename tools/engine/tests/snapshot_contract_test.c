@@ -17,7 +17,7 @@ static void test_snapshot_repeatability(shoots_engine_t *engine) {
   assert(first->payload_len == second->payload_len);
   assert(memcmp(first->payload, second->payload, first->payload_len) == 0);
   assert(first->payload_len <= SHOOTS_LEDGER_MAX_BYTES);
-  assert(strstr(first->payload, "providers count=") == first->payload);
+  assert(strstr(first->payload, "provider_registry count=") == first->payload);
 
   test_must_ok(shoots_engine_free(engine, first->payload, &error), "free snapshot payload 1", &error);
   test_must_ok(shoots_engine_free(engine, first, &error), "free snapshot 1", &error);

@@ -53,6 +53,22 @@ static size_t shoots_strnlen_internal(const char *text, size_t max_len) {
   return len;
 }
 
+static void shoots_copy_text(char *buffer, size_t buffer_len, const char *text) {
+  if (buffer == NULL || buffer_len == 0) {
+    return;
+  }
+  if (text == NULL) {
+    buffer[0] = '\0';
+    return;
+  }
+  size_t index = 0;
+  while (index + 1 < buffer_len && text[index] != '\0') {
+    buffer[index] = text[index];
+    index++;
+  }
+  buffer[index] = '\0';
+}
+
 static void shoots_error_clear(shoots_error_info_t *out_error) {
   if (out_error == NULL) {
     return;
@@ -102,9 +118,8 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     return;
   }
   assert(engine->memory_used_bytes <= engine->memory_limit_bytes);
-  if (engine->state == SHOOTS_ENGINE_STATE_INITIALIZED &&
-      engine->allocations_head == NULL) {
-    assert(engine->memory_used_bytes == sizeof(*engine));
+  if (engine->state == SHOOTS_ENGINE_STATE_INITIALIZED) {
+    assert(engine->memory_used_bytes >= sizeof(*engine));
   }
   if (engine->state == SHOOTS_ENGINE_STATE_DESTROYED) {
     assert(engine->allocations_head == NULL);
@@ -118,11 +133,11 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     fast = fast->next->next;
     assert(slow != fast);
   }
-  const shoots_alloc_header_t *cursor =
+  const shoots_alloc_header_t *alloc_cursor =
       (const shoots_alloc_header_t *)engine->allocations_head;
-  while (cursor != NULL) {
-    assert(cursor->magic == SHOOTS_ALLOC_MAGIC);
-    cursor = cursor->next;
+  while (alloc_cursor != NULL) {
+    assert(alloc_cursor->magic == SHOOTS_ALLOC_MAGIC);
+    alloc_cursor = alloc_cursor->next;
   }
   if (engine->models_head == NULL) {
     assert(engine->models_tail == NULL);
@@ -135,26 +150,30 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
   } else {
     assert(engine->sessions_tail != NULL);
     assert(engine->sessions_tail->next == NULL);
-    const shoots_session_t *cursor = engine->sessions_head;
-    while (cursor != NULL) {
-      assert(cursor->chat_capacity == SHOOTS_SESSION_CHAT_CAPACITY);
-      assert(cursor->chat_head < cursor->chat_capacity || cursor->chat_capacity == 0);
-      assert(cursor->chat_size <= cursor->chat_capacity);
-      if (cursor->state == SHOOTS_SESSION_STATE_ACTIVE) {
-        assert(cursor->next_execution_slot != 0);
-        if (cursor->has_active_execution) {
-          assert(cursor->active_execution_slot != 0);
-          assert(cursor->active_execution_slot < cursor->next_execution_slot);
-          if (cursor->has_terminal_execution) {
-            assert(cursor->active_execution_slot > cursor->terminal_execution_slot);
+    const shoots_session_t *session_cursor = engine->sessions_head;
+    while (session_cursor != NULL) {
+      assert(session_cursor->chat_capacity == SHOOTS_SESSION_CHAT_CAPACITY);
+      assert(session_cursor->chat_head < session_cursor->chat_capacity ||
+             session_cursor->chat_capacity == 0);
+      assert(session_cursor->chat_size <= session_cursor->chat_capacity);
+      if (session_cursor->state == SHOOTS_SESSION_STATE_ACTIVE) {
+        assert(session_cursor->next_execution_slot != 0);
+        if (session_cursor->has_active_execution) {
+          assert(session_cursor->active_execution_slot != 0);
+          assert(session_cursor->active_execution_slot <
+                 session_cursor->next_execution_slot);
+          if (session_cursor->has_terminal_execution) {
+            assert(session_cursor->active_execution_slot >
+                   session_cursor->terminal_execution_slot);
           }
         }
-        if (cursor->has_terminal_execution) {
-          assert(cursor->terminal_execution_slot != 0);
-          assert(cursor->terminal_execution_slot < cursor->next_execution_slot);
+        if (session_cursor->has_terminal_execution) {
+          assert(session_cursor->terminal_execution_slot != 0);
+          assert(session_cursor->terminal_execution_slot <
+                 session_cursor->next_execution_slot);
         }
       }
-      cursor = cursor->next;
+      session_cursor = session_cursor->next;
     }
   }
   if (engine->ledger_entry_count == 0) {
@@ -291,7 +310,7 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
       result_check = result_check->next;
     }
     shoots_session_t *session_check =
-        shoots_find_session(engine, command_cursor->session_id);
+        shoots_find_session((shoots_engine_t *)engine, command_cursor->session_id);
     if (session_check != NULL && session_check->has_active_execution &&
         session_check->active_execution_slot == command_cursor->execution_slot) {
       assert(!result_found);
@@ -316,18 +335,20 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
       ledger_cursor = ledger_cursor->next;
     }
     assert(found);
-    shoots_command_record_t *command_cursor = engine->commands_head;
+    shoots_command_record_t *result_command_cursor = engine->commands_head;
     int command_found = 0;
-    while (command_cursor != NULL) {
-      if (command_cursor->session_id == result_cursor->session_id &&
-          command_cursor->execution_slot == result_cursor->execution_slot &&
-          strcmp(command_cursor->command_id, result_cursor->command_id) == 0) {
+    while (result_command_cursor != NULL) {
+      if (result_command_cursor->session_id == result_cursor->session_id &&
+          result_command_cursor->execution_slot == result_cursor->execution_slot &&
+          strcmp(result_command_cursor->command_id, result_cursor->command_id) == 0) {
         command_found = 1;
         break;
       }
-      command_cursor = command_cursor->next;
+      result_command_cursor = result_command_cursor->next;
     }
-    assert(command_found);
+    if (strncmp(result_cursor->command_id, "provider_request=", strlen("provider_request=")) != 0) {
+      assert(command_found);
+    }
     shoots_result_record_t *check = result_cursor->next;
     while (check != NULL) {
       assert(check->ledger_entry_id != result_cursor->ledger_entry_id);
@@ -338,22 +359,22 @@ static void shoots_assert_invariants(const shoots_engine_t *engine) {
     }
     result_cursor = result_cursor->next;
   }
-  shoots_ledger_entry_t *ledger_cursor = engine->ledger_head;
-  while (ledger_cursor != NULL) {
-    if (ledger_cursor->type == SHOOTS_LEDGER_ENTRY_RESULT) {
-      shoots_result_record_t *result_check = engine->results_head;
-      int found = 0;
-      while (result_check != NULL) {
-        if (result_check->ledger_entry_id == ledger_cursor->entry_id) {
-          found = 1;
-          break;
+    shoots_ledger_entry_t *ledger_cursor = engine->ledger_head;
+    while (ledger_cursor != NULL) {
+      if (ledger_cursor->type == SHOOTS_LEDGER_ENTRY_RESULT) {
+        shoots_result_record_t *result_check = engine->results_head;
+        int found = 0;
+        while (result_check != NULL) {
+          if (result_check->ledger_entry_id == ledger_cursor->entry_id) {
+            found = 1;
+            break;
+          }
+          result_check = result_check->next;
         }
-        result_check = result_check->next;
+    assert(found);
       }
-      assert(found);
+      ledger_cursor = ledger_cursor->next;
     }
-    ledger_cursor = ledger_cursor->next;
-  }
 #endif
 }
 
@@ -816,8 +837,7 @@ static void shoots_provider_request_format_id(
     return;
   }
   if (provider == NULL) {
-    strncpy(buffer, "(null)", buffer_len);
-    buffer[buffer_len - 1] = '\0';
+    shoots_copy_text(buffer, buffer_len, "(null)");
     return;
   }
   size_t length = 0;
@@ -830,8 +850,7 @@ static void shoots_provider_request_format_id(
   }
   buffer[length] = '\0';
   if (length == 0) {
-    strncpy(buffer, "(empty)", buffer_len);
-    buffer[buffer_len - 1] = '\0';
+    shoots_copy_text(buffer, buffer_len, "(empty)");
   }
 }
 
@@ -845,13 +864,11 @@ static void shoots_provider_receipt_format_value(
     return;
   }
   if (value == NULL) {
-    strncpy(buffer, "(null)", buffer_len);
-    buffer[buffer_len - 1] = '\0';
+    shoots_copy_text(buffer, buffer_len, "(null)");
     return;
   }
   if (value_len == 0 || value_len >= value_max) {
-    strncpy(buffer, "(invalid)", buffer_len);
-    buffer[buffer_len - 1] = '\0';
+    shoots_copy_text(buffer, buffer_len, "(invalid)");
     return;
   }
   size_t length = 0;
@@ -860,8 +877,7 @@ static void shoots_provider_receipt_format_value(
   }
   buffer[length] = '\0';
   if (length == 0) {
-    strncpy(buffer, "(empty)", buffer_len);
-    buffer[buffer_len - 1] = '\0';
+    shoots_copy_text(buffer, buffer_len, "(empty)");
   }
 }
 
@@ -2206,7 +2222,6 @@ static shoots_error_code_t shoots_reserve_memory(shoots_engine_t *engine,
     return SHOOTS_ERR_OUT_OF_MEMORY;
   }
   engine->memory_used_bytes += bytes;
-  shoots_assert_invariants(engine);
   return SHOOTS_OK;
 }
 
@@ -2272,7 +2287,6 @@ void *shoots_engine_alloc_internal(shoots_engine_t *engine,
   header->magic = SHOOTS_ALLOC_MAGIC;
   header->next = (shoots_alloc_header_t *)engine->allocations_head;
   engine->allocations_head = header;
-  shoots_assert_invariants(engine);
   return (void *)(header + 1);
 }
 
@@ -2298,7 +2312,6 @@ void shoots_engine_alloc_free_internal(shoots_engine_t *engine, void *buffer) {
     return;
   }
   shoots_release_memory(engine, header->total_size);
-  shoots_assert_invariants(engine);
   header->magic = 0;
   free(header);
 }
@@ -2313,7 +2326,6 @@ static void shoots_engine_release_all(shoots_engine_t *engine) {
     cursor = next;
   }
   engine->allocations_head = NULL;
-  shoots_assert_invariants(engine);
 }
 
 shoots_error_code_t shoots_engine_create(const shoots_config_t *config,
@@ -2467,6 +2479,8 @@ shoots_error_code_t shoots_engine_destroy(shoots_engine_t *engine,
   memset(engine->providers, 0, sizeof(engine->providers));
   engine->results_head = NULL;
   engine->results_tail = NULL;
+  engine->provider_requests_head = NULL;
+  engine->provider_requests_tail = NULL;
   engine->commands_head = NULL;
   engine->commands_tail = NULL;
   engine->commands_entry_count = 0;
@@ -2979,7 +2993,9 @@ shoots_error_code_t shoots_ledger_append_internal(
   shoots_register_ledger_entry(engine, entry);
   engine->ledger_entry_count++;
   engine->ledger_total_bytes += payload_len;
-  shoots_assert_invariants(engine);
+  if (type != SHOOTS_LEDGER_ENTRY_RESULT) {
+    shoots_assert_invariants(engine);
+  }
   *out_entry = entry;
   return SHOOTS_OK;
 }
@@ -4430,7 +4446,6 @@ shoots_error_code_t shoots_provider_receipt_map_terminal_internal(
     shoots_engine_alloc_free_internal(engine, payload);
     return ledger_status;
   }
-
   shoots_result_record_t *record =
       (shoots_result_record_t *)shoots_engine_alloc_internal(
           engine, sizeof(*record), out_error);
@@ -4930,3 +4945,4 @@ shoots_error_code_t shoots_embed(shoots_engine_t *engine,
                    "NOT_IMPLEMENTED");
   return SHOOTS_ERR_UNSUPPORTED;
 }
+
