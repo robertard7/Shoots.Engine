@@ -64,6 +64,10 @@ typedef struct shoots_inference_response {
   uint32_t input_token_count;
 } shoots_inference_response_t;
 
+#define SHOOTS_STOP_REASON_COMPLETED 0u
+#define SHOOTS_STOP_REASON_MAX_OUTPUT_TOKENS 1u
+#define SHOOTS_STOP_REASON_EXECUTION_LIMIT 2u
+
 typedef struct shoots_embedding_request {
   shoots_model_t *model;
   const uint32_t *input_tokens;

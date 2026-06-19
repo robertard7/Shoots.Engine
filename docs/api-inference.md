@@ -14,6 +14,11 @@ The inference contract defines a deterministic request/response interface withou
 - **Stop reason**: An explicit reason for termination (e.g., limit reached, end-of-sequence).
 - **Usage metadata**: Explicit counts for input and output tokens.
 
+## Stop Reasons
+- `SHOOTS_STOP_REASON_COMPLETED` (`0`): deterministic completion reached.
+- `SHOOTS_STOP_REASON_MAX_OUTPUT_TOKENS` (`1`): generation stopped at the explicit output-token cap.
+- `SHOOTS_STOP_REASON_EXECUTION_LIMIT` (`2`): generation stopped at the explicit execution-step cap.
+
 ## Determinism Guarantees
 - Same input tokens, model identifier, and configuration must yield the same output tokens.
 - No timestamps, randomness, or environment-derived behavior.

@@ -111,6 +111,10 @@ typedef struct shoots_inference_response {
   uint32_t input_token_count;
 } shoots_inference_response_t;
 
+#define SHOOTS_STOP_REASON_COMPLETED 0u
+#define SHOOTS_STOP_REASON_MAX_OUTPUT_TOKENS 1u
+#define SHOOTS_STOP_REASON_EXECUTION_LIMIT 2u
+
 shoots_error_code_t shoots_infer(
   shoots_engine_t *engine,
   const shoots_inference_request_t *request,
@@ -122,6 +126,11 @@ shoots_error_code_t shoots_infer(
 - The host owns the request and input token buffers.
 - The engine owns `output_tokens` and must allocate it.
 - The host must release `output_tokens` with `shoots_engine_free`.
+
+### Inference Stop Reasons
+- `SHOOTS_STOP_REASON_COMPLETED`: the engine produced the model's deterministic terminal output for the request.
+- `SHOOTS_STOP_REASON_MAX_OUTPUT_TOKENS`: generation stopped because `max_output_tokens` capped the response.
+- `SHOOTS_STOP_REASON_EXECUTION_LIMIT`: generation stopped because the explicit execution-step budget was exhausted.
 
 ## Embeddings
 ```c
